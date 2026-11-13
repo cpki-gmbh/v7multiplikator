@@ -1,0 +1,16 @@
+Hi Maria,
+
+here are the meeting notes from this morning's sprint review, as promised.
+
+- The search indexing job now finishes in under four minutes after the
+  performance fix landed on Tuesday.
+- The mobile client crash on Android 11 is fixed and will ship with the
+  next release candidate.
+- Marketing asked for a short demo video of the new dashboard; Anna
+  volunteers to record one next week.
+
+Action items for you: review the pull request for the caching layer and
+add your test cases to the shared sheet before Friday.
+
+Thanks,
+Jonas

@@ -1,0 +1,37 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ============================================================================
+; bench_cpp\fib.logo -- the recursive-fib workload, for the SectorLogo C++ port.
+;
+; The four workloads and their expected values are the ones in
+; bench_sectorlogo.logo, which is the reference: this file exists because the C++
+; port cannot self-time (the C-CALL FFI is a deliberate stub, so GetTickCount64
+; is unreachable from a script) and the clock therefore has to come from the host
+; side, via `--bench`.
+;
+; That means the sample is the WHOLE script, so the script has to BE the workload
+; and nothing else. No gate, no Print, no setup: the driver's `iters` argument is
+; the inner count, and every sample it prints is already divided by it. fib 24 is
+; milliseconds on its own in a dynamic interpreter, so iters is small.
+;
+; The function body is deliberately the one in bench_sectorlogo.logo, down to the
+; statement order, differing only in the ';' comments the reader skips. A
+; benchmark that compares two interpreters has to run the same code on both, or
+; it measures the scripts.
+; ============================================================================
+
+Define "fib" [:n] [                                  ; fib n -- naive recursive fibonacci; returns the n-th number
+  IfElse ( :n < 2 ) [                               ; base case: fib 0 = 0, fib 1 = 1
+    Output :n
+  ] [
+    Local "left"                                    ; left/right hold the two recursive results
+    Local "right"
+    Make "left" Fib ( :n - 1 )
+    Make "right" Fib ( :n - 2 )                     ; two calls per node -- this is the measured cost
+    Output ( :left + :right )
+  ]
+]
+
+Fib 24                                              ; the benchmark sample: one fib 24 call, expected 46368

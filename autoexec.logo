@@ -1,0 +1,912 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ================= ANSI console stdlib (autoexec.logo) =================
+
+; ---- control characters ----
+Make "esc" Character 27
+Make "cr"  Character 13
+Make "lf"  Character 10
+Make "bannerbright" 1 ; 1 = the next printbanner draws full-brightness background (Print resets it, so banners in a row dim)
+
+; ---- combined newline atom: one PrintRaw instead of two per Print ----
+Make "crlf" :cr _ :lf
+
+; ---- capability probe: enables VT processing as a side effect ----
+Make "vt24" EnableColors
+
+; ---- key sequences (compare against ReadKey results) ----
+Make "keyescape" :esc
+Make "keyup"      :esc _ "[A"
+Make "keydown"    :esc _ "[B"
+Make "keyright"   :esc _ "[C"
+Make "keyleft"    :esc _ "[D"
+
+; ---- Print (replaces the removed builtin; byte-identical, see section 7) ----
+Define "print" [:v] [
+  PrintRaw :v
+  PrintRaw :crlf
+  Make "bannerbright" 1 ; a Print between banners resets the dim: the next banner is full brightness again
+]
+
+; ---- ClearScreen: erase display + cursor home ----
+Define "clearscreen" [] [
+  PrintRaw :esc _ "[2J"
+  PrintRaw :esc _ "[H"
+]
+
+; ---- SetCursor col row -> cursor position (ANSI CUP, 1-based) ----
+Define "setcursor" [:x :y] [
+  PrintRaw :esc _ "[" _ :y _ ";" _ :x _ "H"
+]
+
+; ---- Sequence "params": emit ESC [ <params> m ----
+Define "sequence" [:p] [
+  PrintRaw :esc _ "[" _ :p _ "m"
+]
+
+; ---- ForegroundCode n -> SGR foreground code for palette index 0..15 ----
+Define "foregroundcode" [:n] [
+  Local "c"
+  IfElse (:n < 8) [ Make "c" :n + 30 ] [ Make "c" :n + 82 ]
+  Output :c
+]
+
+; ---- BackgroundCode n -> SGR background code for palette index 0..15 ----
+Define "backgroundcode" [:n] [
+  Local "c"
+  IfElse (:n < 8) [ Make "c" :n + 40 ] [ Make "c" :n + 92 ]
+  Output :c
+]
+
+; setpalettecolor n -- emit the SGR sequence for 16-color palette foreground n; no return value.
+; setpalettebackground n -- same for the palette background; no return value.
+; resetcolors -- emit SGR 0 (default colors); no return value.
+Define "setpalettecolor" [:n] [ Sequence ForegroundCode :n ]
+Define "setpalettebackground" [:n] [ Sequence BackgroundCode :n ]
+Define "resetcolors" [] [ Sequence "0" ]
+
+; ---- palette as a NearestMatch codebook: [key r g b] rows, key = palette index ----
+Make "pal" [
+  [ 0   0   0   0 ] [ 1   0   0 128 ] [ 2   0 128   0 ] [ 3   0 128 128 ]
+  [ 4 128   0   0 ] [ 5 128   0 128 ] [ 6 128 128   0 ] [ 7 192 192 192 ]
+  [ 8 128 128 128 ] [ 9   0   0 255 ] [10   0 255   0 ] [11   0 255 255 ]
+  [12 255   0   0 ] [13 255   0 255 ] [14 255 255   0 ] [15 255 255 255 ]
+]
+
+; TunerGetActiveResolutionList -> LIST: the shapes that ACTUALLY dispatched in
+; this process, as [[n d] ...] (source: the dispatcher's active-shape registry
+; via the v7_tuner_active_resolutions FFI text, which is the flat form
+; "n d n d ..."). One Split explodes it; the backwards walk pairs n with d
+; and Prepend keeps the dispatch order.
+Define "TunerGetActiveResolutionList" [] [
+  Local "raw" "toks" "out" "i" "pairs" "nval" "dval"
+  Make "raw" CallLibrary ["SELF" "v7_tuner_active_resolutions" "text" []]
+  Make "out" []
+  IfElse (TextLength :raw) > 0 [           ; empty registry -> empty list
+    Make "toks" Split :raw " "
+    Make "pairs" AsInteger ((Length :toks) / 2)   ; TWO tokens per pair: the walk consumes 2 per pass
+    Make "i" Length :toks
+    Repeat :pairs [
+      Make "i" (:i - 1)                      ; backwards: the last d is consumed first
+      Make "dval" TextToNumber Item :toks :i
+      Make "i" (:i - 1)
+      Make "nval" TextToNumber Item :toks :i
+      Make "out" Prepend Prepend :nval Prepend :dval [] :out   ; a [n d] pair
+    ]
+  ] []
+  Output :out
+]
+
+; TunerGetQuantize -> NUMBER: the engine's active forward mode, 1 = Q8 matmul,
+; 0 = F32. Read straight from the inference-context singleton via FFI.
+Define "TunerGetQuantize" [] [
+  Output CallLibrary ["SELF" "v7_get_quantize" "integer" []]
+]
+
+; TunerMatmulSlots -> LIST: the pf slot ids the CURRENT matmul kernel owns
+; (docs/tuner_slots.md slot map). Q8 owns slots 0..7, F32 owns 8..10 -- only
+; these slots feed the timed matmul kernel, so the inline tuner mutates ONLY
+; these (a foreign-kernel slot mutation is a measured no-op and would turn
+; the A/B into noise). The backwards walk + Prepend emits ascending order.
+Define "TunerMatmulSlots" [] [
+  Local "slots" "i"
+  Make "slots" []
+  IfElse (TunerGetQuantize = 1) [
+    Make "i" 8
+    Repeat 8 [
+      Make "i" (:i - 1)
+      Make "slots" Prepend :i :slots              ; 7 6 5 4 3 2 1 0 -> ascending
+    ]
+  ] [
+    Make "i" 11
+    Repeat 3 [
+      Make "i" (:i - 1)
+      Make "slots" Prepend :i :slots              ; 10 9 8 -> ascending
+    ]
+  ]
+  Output :slots
+]
+
+; ---- boolean literals: False / True return the language's truth values ----
+; The language's false IS NIL (every equality/relational primitive returns the
+; TRUE atom or NIL), and the True/False WORD atoms are accepted by primitives
+; that name booleans (NearestMatch). These definitions give scripts a callable
+; spelling that yields exactly those values: (0 = 1) -> NIL, (0 = 0) -> TRUE atom.
+Define "False" [] [
+  Output (0 = 1)
+]
+Define "True" [] [
+  Output (0 = 0)
+]
+
+; ---- NearestColor r g b -> palette INDEX (0..15) with min squared distance ----
+; The full flag must be the TRUE atom, NIL, or the interned FALSE word --
+; the False definition above returns exactly such a value.
+Define "nearestcolor" [:r :g :b] [
+  Local "v"
+  Make "v" Prepend :r Prepend :g Prepend :b []
+  Local "result"
+  Make "result" NearestMatch False :v :pal
+  Output First :result
+]
+
+; ---- debug helper: full mode shows all 16 distances, ascending ----
+Define "nearestcolorall" [:r :g :b] [
+  Local "v"
+  Make "v" Prepend :r Prepend :g Prepend :b []
+  Output NearestMatch True :v :pal
+]
+
+; ---- SetColor r g b: truecolor fg, or nearest palette fg ----
+Define "setcolor" [:r :g :b] [
+  Local "n"
+  IfElse :vt24 [
+    Sequence ( "38;2;" _ :r _ ";" _ :g _ ";" _ :b )
+  ] [
+    Make "n" NearestColor :r :g :b
+    Sequence ForegroundCode :n
+  ]
+]
+
+; ---- SetBackground r g b: truecolor bg, or nearest palette bg ----
+Define "setbackground" [:r :g :b] [
+  Local "n"
+  IfElse :vt24 [
+    Sequence ( "48;2;" _ :r _ ";" _ :g _ ";" _ :b )
+  ] [
+    Make "n" NearestColor :r :g :b
+    Sequence BackgroundCode :n
+  ]
+]
+
+; ---- convenience color constants (indices stay authoritative) ----
+Make "black"   0
+Make "blue"    1
+Make "green"   2
+Make "cyan"    3
+Make "red"     4
+Make "magenta" 5
+Make "yellow"  6
+Make "white"   7
+
+; ---- While cond-block body-block: loop while cond-block Outputs a truthy value ----
+Define "while" [:conditionblock :bodyblock] [
+  Repeat [
+    IfElse Run :conditionblock [] [ Stop ]
+    Run :bodyblock
+  ]
+]
+
+; ---- self-test: prints a red/green/blue line on every capable terminal ----
+Define "consoleselftest" [] [
+  ClearScreen
+  SetColor 255 0 0
+  Print "red"
+  SetColor 0 255 0
+  Print "green"
+  SetColor 0 0 255
+  Print "blue"
+  ResetColors
+  SetCursor 1 5
+  Print "cursor-test-done"
+]
+
+; ---- PrintBanner label: gradient banner, white text, 20-space indent whose
+; ---- leading spaces fade from 100% brightness into the 50% text gradient ----
+; V7ConsoleWidth -> NUMBER: the console's visible column count (80 when the
+; output is piped). Wraps the v7_get_console_width export so banner logic
+; pads labels to the real console width instead of a hardcoded number.
+Define "V7ConsoleWidth" [] [
+  Output CallLibrary ["SELF" "v7_get_console_width" "integer" []]
+]
+
+Define "printbanner" [:label] [
+  Local "width" "pos" "frac" "bgr" "bgg" "bgb" "ch" "labellen" "maxidx" "choff" "f20" "g20r" "g20b" "t" "conw" "labpad"
+  Make "conw" V7ConsoleWidth ; the real console width -- the banner spans the whole line
+  Make "width" Maximum 20 :conw ; at least 20 columns (the gradient needs its lead-in run), up to the console edge
+  Make "labpad" :label ; the label copy grows in place, right-aligned by its leading spaces
+  Repeat [
+    IfElse (TextLength :labpad) < (:width - 20) [ Make "labpad" " " _ :labpad ] [ Stop ] ; one more leading space until the label fills the region right-exactly (a label longer than the region stays unpadded and its tail cuts as before)
+  ]
+  Make "label" :labpad ; the padded label replaces the raw one for the draw below
+  Make "labellen" TextLength :label ; the padded length: the draw loop then fills the whole label region with the string itself
+  Make "maxidx" :width - 1
+  Make "pos" 0
+  Make "f20" (AsFloat 20) / (AsFloat :maxidx)
+  Make "g20r" AsInteger Round (0.5 * (255 - 205 * :f20))
+  Make "g20b" AsInteger Round (0.5 * (255 - 127 * :f20))
+  Make "dim" 1
+  IfElse (:bannerbright = 1) [ Make "dim" 1 ] [ Make "dim" 2 ] ; a banner right after another banner draws its background at half brightness
+  Make "bannerbright" 1 ; the next banner (if no Print sits between us) dims
+  SetColor 255 255 255
+  Repeat :width [
+    IfElse (:pos < 20) [
+      Make "t" (AsFloat :pos) / (AsFloat 19)
+    Make "bgr" AsInteger Round ((255 - (255 - :g20r) * :t) / :dim)
+    Make "bgg" :bgr
+    Make "bgb" AsInteger Round ((255 - (255 - :g20b) * :t) / :dim)
+    ] [
+      Make "frac" (AsFloat :pos) / (AsFloat :maxidx)
+    Make "bgr" AsInteger Round (0.5 * (255 - 205 * :frac) / :dim)
+    Make "bgg" :bgr
+    Make "bgb" AsInteger Round (0.5 * (255 - 127 * :frac) / :dim)
+    ]
+    SetBackground :bgr :bgg :bgb
+    IfElse (:pos < 20) [
+      PrintRaw " "
+    ] [
+      Make "choff" :pos - 20
+      IfElse (:choff < :labellen) [
+        Make "ch" Part :label :choff 1
+        PrintRaw :ch
+      ] [
+        PrintRaw " "
+      ]
+    ]
+    Make "pos" :pos + 1
+  ]
+  ResetColors
+  PrintRaw :crlf
+  Make "lastbanner" :label ; the label travels to the heartbeat line: token + banner info render as one line
+]
+
+; ===========================================================================
+; FFI wrapper buckets (autoexec.logo)
+;
+; Every CallLibrary descriptor in the project follows ONE quoting contract
+; (AGENTS.md Sec.146 facts 40-42), now encoded HERE and nowhere else:
+;   module "SELF" quoted uppercase (a bare SELF is lowercased by the lexer
+;   and resolves nothing); proc names quoted (case preserved, delimiters
+;   inert); type names quoted lowercase "integer"/"void"/"text"/"pointer".
+;
+; Each IncludeXxxFunctions function installs its topic's wrappers as plain
+; Logo Defines, so scripts never spell a CallLibrary descriptor. Every
+; Include redefines its wrappers unconditionally on each call -- idempotent
+; AND hot-reload friendly (edit a wrapper, the next script eval picks it
+; up). autoexec calls them all at load, so the wrappers exist for every
+; script; a script MAY call an Include itself to stay standalone-testable
+; under run_sectorlogo.exe with an older database.
+; ===========================================================================
+
+; IncludeFileFunctions -- file I/O over the engine's v7s_readfile/v7s_writefile.
+Define "IncludeFileFunctions" [] [
+
+  ; ReadTextFile path -> string atom with the whole file (empty on error),
+  ; through the shared 1 MiB execute buffer. Parse immediately: a later
+  ; ReadTextFile or DefineCommand reuse overwrites that buffer.
+  Define "ReadTextFile" [:path] [
+    Output CallLibrary ["SELF" "v7s_readfile" "text" ["text"]] :path
+  ]
+
+  ; WriteTextFile path text append -> NUMBER 1 on success, 0 on failure.
+  ; append 0 truncates/creates, nonzero appends/creates.
+  Define "WriteTextFile" [:path :text :append] [
+    Output CallLibrary ["SELF" "v7s_writefile" "integer" ["text" "text" "integer"]] :path :text :append
+  ]
+
+]
+
+; IncludePromptFunctions -- the current chat turn's raw user prompt.
+Define "IncludePromptFunctions" [] [
+
+  ; GetUserPrompt -> string atom ("" when absent). The prompt is engine
+  ; state, valid for the whole turn; parse a copy, never hold it across
+  ; turns. (Return type "pointer" is what every existing call site uses.)
+  Define "GetUserPrompt" [] [
+    Output CallLibrary ["SELF" "v7s_get_user_prompt" "pointer" []]
+  ]
+
+  ; V7Position -> NUMBER: the engine's current KV-cache position (absolute:
+  ; prompt tokens plus every generated token, carried across turns on
+  ; reset=0 sessions). Wraps the v7_get_position export so sidecars can
+  ; budget generation phases (think-token ceilings) without spelling an
+  ; FFI descriptor. Capture a turn-start value and compare deltas -- the
+  ; absolute value grows with the prompt and never resets mid-session.
+  Define "V7Position" [] [
+    Output CallLibrary ["SELF" "v7_get_position" "integer" []]
+  ]
+
+  ; ThinkModeActive -> NUMBER: 1 when thinking templates are selected (the
+  ; model renders think blocks), 0 when thinking is off. Wraps the
+  ; v7_get_think_mode_active export. A think-budget limiter must gate on
+  ; this -- when thinking is off there is no think block to close.
+  Define "ThinkModeActive" [] [
+    Output CallLibrary ["SELF" "v7_get_think_mode_active" "integer" []]
+  ]
+
+  ; GenCount -> NUMBER: tokens generated so far THIS chat turn (live; 0 at
+  ; turn start, updated once per generated token). Wraps the
+  ; v7_get_gen_count export. This is the RELATIVE position a think-budget
+  ; limiter compares against its ceiling -- the absolute V7Position carries
+  ; the whole session and would fire on every later turn.
+  Define "GenCount" [] [
+    Output CallLibrary ["SELF" "v7_get_gen_count" "integer" []]
+  ]
+
+]
+
+; ThinkLimit piece limit -> the effective current-token piece.
+; STATELESS think-budget limiter, shared by every sidecar: call it at the
+; very top of a sidecar's per-token body and use the result everywhere the
+; sidecar would have read :PIECE --
+;   Make "currentToken" ThinkLimit :Piece 400
+; Fires only when thinking is ON and the generated count for this turn
+; exceeds :limit. Two replacements, both via SetOutputToken (the engine decodes
+; the replacement exactly as if the model had generated it, so the
+; sidecar's own think-close logic runs unchanged):
+;   - a sentence boundary (newline or period) while the stream has NO think
+;     close yet becomes the think-close token: the block ends at the next
+;     sentence boundary and the sidecar's close logic (RAG injection,
+;     POST-FACT acceptance) fires normally. Keeps firing on later
+;     boundaries, which also ends a runaway RE-THINK after an injection.
+;   - a generated think-OPEN tag becomes a single space: over budget the
+;     model must never open a new think block (it would never close it and
+;     the turn would fall into the no-think retry, losing every injection).
+; Everything else passes through untouched. No state, nothing to reset.
+; When the close injection fires, the limiter sets the Database key
+; "thinklimit_fired" to "1" so a sidecar's think-close logic can tell a
+; FORCED close from the model's own one and react differently (a marker,
+; not a decision input -- the limiter itself stays stateless). Sidecars
+; that read it clear it at EOS.
+Define "ThinkLimit" [:piece :limit] [
+  IfElse (GenCount > :limit) [
+    IfElse ThinkModeActive [
+      IfElse ((:piece = "\n") || (:piece = ".")) [
+        Make "s" GetStream
+        IfElse IsNumber Search "</think>" :s [
+          Output :piece
+        ] [
+          Make "closeid" EncodeWord "</think>"
+          SetOutputToken :closeid
+          DatabaseSet "thinklimit_fired" "1"
+          PrintBanner "think limiter - budget hit, sentence boundary replaced by the think close"
+          Output "</think>"
+        ]
+      ] [
+        IfElse (:piece = ("<thi" _ "nk>")) [
+          Make "spaceid" EncodeWord " "
+          SetOutputToken :spaceid
+          PrintBanner "think limiter - budget hit, think-open suppressed (single space)"
+          Output " "
+        ] [
+          Output :piece
+        ]
+      ]
+    ] [
+      Output :piece
+    ]
+  ] [
+    Output :piece
+  ]
+]
+
+; IncludeExecFunctions -- child-process spawn + capture, and the exec trace gate.
+Define "IncludeExecFunctions" [] [
+
+  ; RunTool exe arg1 arg2 arg3 -> string atom with the captured stdout
+  ; (+ stderr) of the spawned process, through the shared 1 MiB execute
+  ; buffer (same reuse rule as ReadTextFile). Unused trailing args pass [].
+  Define "RunTool" [:exe :arg1 :arg2 :arg3] [
+    Output CallLibrary ["SELF" "v7_execute" "text" ["pointer" "pointer" "pointer" "pointer"]] :exe :arg1 :arg2 :arg3
+  ]
+
+  ; DoFatal msg -- print msg to stdout, then die through the standard
+  ; engine FATAL path. The script-reachable reaction to an unrecoverable
+  ; state: never silently continue (error hiding is a bug).
+  Define "DoFatal" [:msg] [
+    CallLibrary ["SELF" "v7_do_fatal" "void" ["pointer"]] :msg
+  ]
+
+]
+
+; IncludeTuningFunctions -- the in-system A/B/A dispatch tuner surface.
+; The tuner self-activates at the first chat (tune_init runs once, the
+; first-chat holdback releases at that chat's end) and every configured
+; shape then runs its own delay, A, B, C stream. There is no enable/disable,
+; no warmup, no calibration, no margin, and the ASM tuner carries no RNG --
+; the verdict scripts draw their randomness from the Logo world's own Random
+; primitive. Mutation (TuneSetParam) and the per-shape delay (TuneSetDelay)
+; answer ONLY inside a verdict callback: the engine scopes them with a
+; mutation flag around the verdict eval.
+Define "IncludeTuningFunctions" [] [
+
+  ; TuneSetNeeded n -- hard error: the A/B/A contract replaced the
+  ; wins-needed knob (each candidate uses exactly one A/B/A triple). The
+  ; export survives for binary compatibility only.
+  Define "TuneSetNeeded" [:wins] [
+    CallLibrary ["SELF" "v7s_tune_set_needed" "void" ["integer"]] :wins
+  ]
+
+  ; TuneSetDelay n -- set the CURRENT shape's reload delay. Only legal
+  ; inside a verdict callback (the mutation scope); anywhere else the call
+  ; is a hard error. Use the DB keys tuner:delaydefault / tuner:delay_large
+  ; to set the initial delays.
+  Define "TuneSetDelay" [:calls] [
+    CallLibrary ["SELF" "v7s_tune_set_delay" "void" ["integer"]] :calls
+  ]
+
+  ; TuneSetDump mode -- 0 silent, 1 all diagnostics, 2 accept-only.
+  Define "TuneSetDump" [:mode] [
+    CallLibrary ["SELF" "v7s_tune_set_dump" "void" ["integer"]] :mode
+  ]
+
+  ; TuneGetDump -> NUMBER mode (0/1/2), the current diagnostics gate.
+  Define "TuneGetDump" [] [
+    Output CallLibrary ["SELF" "v7s_tune_get_dump" "integer" []]
+  ]
+
+  ; TuneSetShape rows cols -- hard error: the dispatch activates its own
+  ; per-shape state now (one independent A/B/A stream per configured shape),
+  ; manual shape selection is obsolete. The export survives for binary
+  ; compatibility only.
+  Define "TuneSetShape" [:rows :cols] [
+    CallLibrary ["SELF" "v7s_tune_set_shape" "void" ["integer" "integer"]] :rows :cols
+  ]
+
+  ; TuneGetParam idx -> NUMBER candidate param_set[idx] (0..105) of the
+  ; currently dispatched shape.
+  Define "TuneGetParam" [:idx] [
+    Output CallLibrary ["SELF" "v7s_tune_get_param" "integer" ["integer"]] :idx
+  ]
+
+  ; TuneSetParam idx val -- write candidate param_set[idx] of the CURRENT
+  ; shape. Only legal inside a verdict callback. FATALs on idx outside
+  ; [0..105], num_chunks < 1, or a batch size outside [1,64].
+  Define "TuneSetParam" [:idx :val] [
+    CallLibrary ["SELF" "v7s_tune_set_param" "void" ["integer" "integer"]] :idx :val
+  ]
+
+  ; TuneGetBaseline idx -> NUMBER baseline param_set[idx] of the currently
+  ; dispatched shape (returns 0 before any shape activated).
+  Define "TuneGetBaseline" [:idx] [
+    Output CallLibrary ["SELF" "v7s_tune_get_baseline" "integer" ["integer"]] :idx
+  ]
+
+  ; TuneCurrentN / TuneCurrentD -> NUMBER, the n/d of the shape whose
+  ; A/B/A measurement just completed; the verdict scripts derive the
+  ; tuner:cfg:<NxD> keys from them.
+  Define "TuneCurrentN" [] [
+    Output CallLibrary ["SELF" "v7s_tune_current_n" "integer" []]
+  ]
+  Define "TuneCurrentD" [] [
+    Output CallLibrary ["SELF" "v7s_tune_current_d" "integer" []]
+  ]
+
+]
+
+; DefineRagFunctions -- the RAG tool layer: bm25_rag.exe (memory and
+; knowledge-base corpora), web_ragg.exe (internet retrieval) and the memory
+; distillation pipeline, wrapped so no script ever spawns a process itself.
+; Corpus selection is DATA (the base=/xbase= options on RagSearch), never a
+; wrapper -- one search entry point serves every corpus.
+Define "DefineRagFunctions" [] [
+
+  ; RagRemember fact opts -> bm25_rag.exe remember: append a fact line to a
+  ; memory corpus with NOOP-aware dedup. :opts is the packed option string
+  ; ("dedup=S;base=PATH"); the return is the tool's stored/NOOP text. The
+  ; result lives in the shared 1 MiB execute buffer -- parse it immediately,
+  ; any later wrapper call overwrites it.
+  DefineCommand "RagRemember" [:fact :opts] "examples/rag/bm25_rag.exe" "remember \"%s\" \"%s\""
+
+  ; RagSearch query opts -> bm25_rag.exe search: BM25 ranking over a corpus
+  ; file. :opts picks the corpus and the calibration ("base=PATH" mandatory;
+  ; optional maxlines/minscore/topmin/dedup/recency/recent/xbase). Returns
+  ; the ranked lines, empty when the dual floor suppresses injection.
+  DefineCommand "RagSearch" [:query :opts] "examples/rag/bm25_rag.exe" "search \"%s\" \"%s\""
+
+  ; RagAdd text -> bm25_rag.exe add: raw corpus append, no dedup, no tag
+  ; routing (bulk seeding only; ordinary writes go through RagRemember).
+  DefineCommand "RagAdd" [:text] "examples/rag/bm25_rag.exe" "add \"%s\""
+
+  ; RagMakeQuery input -> web_ragg.exe makequery: distill a web-search query
+  ; out of arbitrary turn text (internet RAG, stage 1).
+  DefineCommand "RagMakeQuery" [:input] "examples/rag/web_ragg/web_ragg.exe" "makequery \"%s\""
+
+  ; RagWebSearch query opts -> web_ragg.exe search: fetch ranked web results
+  ; for a query string (internet RAG, stage 2).
+  DefineCommand "RagWebSearch" [:query :opts] "examples/rag/web_ragg/web_ragg.exe" "search \"%s\" \"%s\""
+
+  ; MemDistill -> the memory-distiller spawn behind RagDistill: runs
+  ; llm_text_processor -distill over the canonical mem_input.txt with the
+  ; canonical model/db and the prepend/append prompt files; stdout carries
+  ; ONLY the distilled tagged lines (the processor's own diagnostics go to
+  ; its log file, not the capture).
+  DefineCommand "MemDistill" [] "bin/llm_text_processor.exe" "bin/v7_threading.dll weights/databases/qwen3_0.6b/lz4ht.db x x -distill -maxgen 120 -finputtext examples/rag/memory/mem_input.txt -fprepend examples/rag/memory/prepend.txt -fappend examples/rag/memory/append.txt"
+
+  ; RagDistill thought -> the whole distillation pipeline as ONE call:
+  ; writes :thought to the canonical mem_input.txt, runs MemDistill, and
+  ; returns the tagged lines (USER:/SELF:/NOTE:). Parse immediately: the
+  ; result lives in the shared execute buffer. Split the return on "\n" and
+  ; route each line; empty return = nothing worth remembering.
+  Define "RagDistill" [:thought] [
+    Make "dw" WriteTextFile "examples/rag/memory/mem_input.txt" :thought 0
+    Output MemDistill
+  ]
+
+]
+
+; DefinePureLogoBM25 -- in-process BM25 retrieval with ZERO child processes
+; (the pipeline of examples/research/herbivorous_cats/herbivorous_bm25.logo,
+; generalized from its inlined corpus to the BM25Init argument). Identical
+; math to bm25_rag.exe: idf = ln(1 + (N-df+0.5)/(df+0.5)) floored at 0,
+; tfc = tf*(k1+1) / (tf + k1*(1-b+b*len/avglen)), coverage multiplier
+; (0.3 + 0.7*cov), topic sentence *1.15, auto-stopword at df/N > 0.4, and
+; the dual inject floor (density >= 0.026 or topscore >= 3.0). Chunks and
+; indexes per search -- intended for ~10 KB corpora, the proven pure-Logo
+; scale (docs/embedded_retrieval_system.md).
+Define "DefinePureLogoBM25" [] [
+
+  ; BM25Init corpus -> NUMBER 1 once the corpus is staged. Resets the
+  ; config globals to the calibrated defaults; BM25Set* override after.
+  Define "BM25Init" [:corpus] [
+    Make "bm25corpus" :corpus
+    Make "bm25sw" " the a an and or of to in is are was were it its that this with for as on at by be been they their them he she his her we you i not but from has have had do does did will would can could should than then so such into over after before between during above below up down out off again further once here there when where why how all any both each few more most other some no nor only own same too very just also about what which who whom these those am if because while against under "
+    Make "bm25k1" 1.2
+    Make "bm25b" 0.75
+    Make "bm25dens" 0.026
+    Make "bm25topmin" 3.0
+    Make "bm25maxlines" 3
+    Output 1
+  ]
+
+  ; BM25SetK1 v -- BM25 length-normalization strength (default 1.2).
+  Define "BM25SetK1" [:v] [ Make "bm25k1" :v ]
+
+  ; BM25SetB v -- BM25 length-divisiveness (default 0.75).
+  Define "BM25SetB" [:v] [ Make "bm25b" :v ]
+
+  ; BM25SetFloor density topmin -- the dual inject floor: inject only when
+  ; density >= :density OR topscore >= :topmin (defaults 0.026 / 3.0).
+  Define "BM25SetFloor" [:density :topmin] [
+    Make "bm25dens" :density
+    Make "bm25topmin" :topmin
+  ]
+
+  ; BM25SetMaxLines n -- how many top-scored sentences the answer carries
+  ; (default 3).
+  Define "BM25SetMaxLines" [:n] [ Make "bm25maxlines" :n ]
+
+  ; Bm25ReplaceAll text old new -- replace EVERY occurrence of :old in
+  ; :text with :new (Replace substitutes only the first hit).
+  Define "Bm25ReplaceAll" [:text :old :new] [
+    Make "result" :text
+    Repeat [
+      Make "found" Search :old :result
+      IfElse IsNumber :found [
+        Make "result" Replace :result :old :new
+      ] [
+        Stop
+      ]
+    ]
+    Output :result
+  ]
+
+  ; Bm25Ltrim s -- drop leading spaces (endless walk, Stop on the first
+  ; non-space; Repeat with no count is the unbounded-walk idiom).
+  Define "Bm25Ltrim" [:s] [
+    Repeat [
+      IfElse ((Part :s 0 1) = " ") [
+        Make "s" Part :s 1 999999
+      ] [
+        Stop
+      ]
+    ]
+    Output :s
+  ]
+
+  ; Bm25Tokenize text -> term list: lowercase alnum words (every length,
+  ; stopwords dropped) as unigrams, then bigrams w1_w2 over the filtered
+  ; unigram list (bigrams span dropped stopwords, like bm25_rag.exe).
+  ; Words does the lowercase + alnum-run tokenization natively; NGrams
+  ; builds the adjacent word-pair windows in one native call. The stopword
+  ; probe keeps the space-guard form (" w " inside :bm25sw) so a token that
+  ; is merely a SUBSTRING of a stopword is never dropped; IsNumber is
+  ; mandatory because Search returning 0 (hit at position 0) is falsy.
+  Define "Bm25Tokenize" [:text] [
+    Local "toks" "w" "uni" "n" "pairs" "p" "a" "b2" "terms"
+    Make "toks" Words :text
+    Make "uni" []
+    Repeat [
+      IfElse (:toks = []) [ Stop ] []
+      Make "w" First :toks
+      Make "toks" ButFirst :toks
+      IfElse IsNumber Search (" " _ :w _ " ") :bm25sw [] [ Make "uni" Prepend :w :uni ]
+    ]
+    Make "uni" Reverse :uni
+    Make "terms" :uni
+    Make "n" Length :uni
+    IfElse (:n > 1) [
+      Make "pairs" NGrams :uni 2
+      Repeat [
+        IfElse (:pairs = []) [ Stop ] []
+        Make "p" First :pairs
+        Make "a" First :p
+        Make "b2" Item :p 1
+        Make "terms" Prepend (:a _ "_" _ :b2) :terms
+        Make "pairs" ButFirst :pairs
+      ]
+    ] []
+    Output :terms
+  ]
+
+  ; Bm25TermHash t -> the term's hash FLOAT when it is a query term,
+  ; -1.0 otherwise. Probes the sorted query map :bm25qmap (dynamic scope,
+  ; built by BM25Search); walks the equal-hash neighborhood so collisions
+  ; resolve by exact atom compare.
+  Define "Bm25TermHash" [:t] [
+    Local "h" "ix" "el" "hh" "n"
+    Make "h" HashNumber :t
+    Make "ix" FindFirstAtLeast :bm25qmap 0 :h
+    IfElse IsNumber :ix [
+      Make "n" Length :bm25qmap
+      Repeat [
+        IfElse (:ix < :n) [] [
+          Stop
+        ]
+        Make "el" Item :bm25qmap :ix
+        Make "hh" First :el
+        IfElse (:hh > :h) [
+          Stop
+        ] []
+        IfElse (:hh = :h) [
+          IfElse ((Item :el 1) = :t) [
+            Output :h
+          ] []
+        ] []
+        Make "ix" :ix + 1
+      ]
+    ] []
+    Output -1.0
+  ]
+
+  ; BM25Search query -> the top sentences joined by newline ("" = no match
+  ; or below the floor). Full pipeline over :bm25corpus: chunk into
+  ; sentences (first sentence of each paragraph = topic), tokenize query +
+  ; chunks, tf/df alists keyed by term hash, BM25 scoring with coverage and
+  ; topic bonus, descending rank, dual floor, top-N pick.
+  Define "BM25Search" [:query] [
+    Local "ctext" "paras" "chunks" "topics" "pi" "para" "sents" "si" "one" "first"
+    Local "n" "qterms" "qi" "t" "qmap" "ph" "pt" "qk" "quni" "el" "i"
+    Local "terms" "tot" "lens" "tfls" "dfa" "tfl" "ti" "h" "ix" "c" "avg"
+    Local "j" "len" "s" "hu" "pair" "d" "idf" "lenn" "den" "tfc" "cov"
+    Local "pairs" "sp" "top" "dens" "out" "cnt"
+
+    ; -- chunk the corpus into sentences; first sentence per paragraph = topic
+    Make "ctext" Bm25ReplaceAll :bm25corpus "?" "."
+    Make "ctext" Bm25ReplaceAll :ctext "!" "."
+    Make "paras" Split :ctext "\n\n"
+    Make "chunks" []
+    Make "topics" []
+    Make "pi" 0
+    Repeat Length :paras [
+      Make "para" Item :paras :pi
+      Make "sents" Split :para "."
+      Make "si" 0
+      Make "first" 1
+      Repeat Length :sents [
+        Make "one" Bm25Ltrim Item :sents :si
+        IfElse (:one = "") [] [
+          Make "chunks" Prepend (:one _ ".") :chunks
+          Make "topics" Prepend :first :topics
+          Make "first" 0
+        ]
+        Make "si" :si + 1
+      ]
+      Make "pi" :pi + 1
+    ]
+    Make "chunks" Reverse :chunks
+    Make "topics" Reverse :topics
+    Make "n" Length :chunks
+    Print "bm25: chunks built:"
+    Print :n
+
+    ; -- query terms -> sorted dedup'd hash map [[h term] ...] + unigram count
+    Make "qterms" Bm25Tokenize :query
+    IfElse (:qterms = []) [
+      Print "bm25: no usable query terms -> empty"
+      Output ""
+    ] []
+    Make "qmap" []
+    Make "qi" 0
+    Repeat Length :qterms [
+      Make "t" Item :qterms :qi
+      Make "qmap" Prepend (Prepend HashNumber :t Prepend :t []) :qmap
+      Make "qi" :qi + 1
+    ]
+    Make "qmap" Sort :qmap
+    Make "qk" []
+    Make "quni" 0
+    Make "ph" -1.0
+    Make "pt" ""
+    Make "i" 0
+    Repeat Length :qmap [
+      Make "el" Item :qmap :i
+      IfElse (((First :el) = :ph) && ((Item :el 1) = :pt)) [] [
+        Make "qk" Prepend :el :qk
+        IfElse IsNumber Search "_" Item :el 1 [] [
+          Make "quni" :quni + 1
+        ]
+        Make "ph" First :el
+        Make "pt" Item :el 1
+      ] []
+      Make "i" :i + 1
+    ]
+    Make "bm25qmap" Reverse :qk
+    IfElse (:bm25qmap = []) [
+      Print "bm25: query map empty -> empty"
+      Output ""
+    ] []
+    Print "bm25: distinct query terms:"
+    Print Length :bm25qmap
+    Print "bm25: distinct query unigrams:"
+    Print :quni
+
+    ; -- single pass over chunk terms: per-chunk tf alist + global df alist,
+    ;    both keyed by term hash (FindItem requires numeric keys)
+    Make "tot" 0
+    Make "lens" []
+    Make "tfls" []
+    Make "dfa" []
+    Make "i" 0
+    Repeat :n [
+      Make "terms" Bm25Tokenize Item :chunks :i
+      Make "tot" :tot + (Length :terms)
+      Make "lens" Prepend Length :terms :lens
+      Make "tfl" []
+      Make "ti" 0
+      Repeat Length :terms [
+        Make "t" Item :terms :ti
+        Make "h" Bm25TermHash :t
+        If (:h >= 0) [
+          Make "ix" FindItem :tfl 0 :h
+          IfElse IsNumber :ix [
+            Make "c" Item Item :tfl :ix 2
+            Make "tfl" SetItem :tfl :ix Prepend :h Prepend :t Prepend (:c + 1) []
+          ] [
+            Make "tfl" Prepend Prepend :h Prepend :t Prepend 1 [] :tfl
+          ]
+        ]
+        Make "ti" :ti + 1
+      ]
+      Make "tfls" Prepend :tfl :tfls
+      ; df: +1 per chunk per distinct hit term
+      Make "j" 0
+      Repeat Length :tfl [
+        Make "pair" Item :tfl :j
+        Make "h" First :pair
+        Make "ix" FindItem :dfa 0 :h
+        IfElse IsNumber :ix [
+          Make "c" Item Item :dfa :ix 2
+          Make "dfa" SetItem :dfa :ix Prepend :h Prepend Item :pair 1 Prepend (:c + 1) []
+        ] [
+          Make "dfa" Prepend Prepend :h Prepend Item :pair 1 Prepend 1 [] :dfa
+        ]
+        Make "j" :j + 1
+      ]
+      Make "i" :i + 1
+    ]
+    Make "tfls" Reverse :tfls
+    Make "lens" Reverse :lens
+    Make "avg" (AsFloat :tot) / (AsFloat :n)
+    Print "bm25: total terms / avg chunk len:"
+    Print :tot
+    Print :avg
+
+    ; -- BM25 scoring per chunk
+    Make "pairs" []
+    Make "i" 0
+    Repeat :n [
+      Make "tfl" Item :tfls :i
+      Make "len" Item :lens :i
+      Make "s" 0
+      Make "hu" 0
+      Make "j" 0
+      Repeat Length :tfl [
+        Make "pair" Item :tfl :j
+        Make "h" First :pair
+        Make "t" Item :pair 1
+        Make "c" Item :pair 2
+        Make "ix" FindItem :dfa 0 :h
+        Make "d" Item Item :dfa :ix 2
+        If ((:d * 10) > (:n * 4)) [
+          Make "d" :n
+        ]
+        Make "idf" NaturalLog (1 + ((((AsFloat :n) - (AsFloat :d)) + 0.5) / ((AsFloat :d) + 0.5)))
+        If (:idf < 0) [
+          Make "idf" 0
+        ]
+        Make "lenn" (AsFloat :len) / :avg
+        Make "den" :c + (:bm25k1 * ((1 - :bm25b) + (:bm25b * :lenn)))
+        Make "tfc" ((:c * (:bm25k1 + 1)) / :den)
+        Make "s" :s + (:idf * :tfc)
+        If (IsNumber (Search "_" :t)) [
+          Make "hu" :hu + 1
+        ]
+        Make "j" :j + 1
+      ]
+      Make "cov" (AsFloat :hu) / (AsFloat :quni)
+      Make "s" :s * (0.3 + (0.7 * :cov))
+      IfElse ((Item :topics :i) = 1) [
+        Make "s" :s * 1.15
+      ] []
+      Make "pairs" Prepend Prepend :s Prepend Item :chunks :i [] :pairs
+      Make "i" :i + 1
+    ]
+
+    ; -- rank descending, apply the dual floor, pick the top lines
+    Make "sp" Reverse Sort :pairs
+    Make "top" First Item :sp 0
+    Make "dens" :top / (AsFloat :quni)
+    Print "bm25: rank1 score / density floor check (need density 0.026 or top 3.0):"
+    Print :top
+    Print :dens
+    IfElse ((:dens < :bm25dens) && (:top < :bm25topmin)) [
+      Print "bm25: BELOW floor -> suppressed"
+      Output ""
+    ] []
+    Make "out" ""
+    Make "cnt" 0
+    Make "i" 0
+    Repeat Length :sp [
+      Make "el" Item :sp :i
+      If ((First :el) > 0) [
+        IfElse (:out = "") [
+          Make "out" Item :el 1
+        ] [
+          Make "out" :out _ "\n" _ Item :el 1
+        ]
+        Make "cnt" :cnt + 1
+        If (:cnt > (:bm25maxlines - 1)) [
+          Stop
+        ]
+      ] []
+      Make "i" :i + 1
+    ]
+    Output :out
+  ]
+
+]
+
+; ---- install every bucket at load: the wrappers exist for every script ----
+IncludeFileFunctions
+IncludePromptFunctions
+IncludeExecFunctions
+IncludeTuningFunctions
+DefineRagFunctions
+DefinePureLogoBM25
+
+; ---- pure-Logo BM25 config globals: TOP-LEVEL Makes, by language law ----
+; Make inside a user fn can UPDATE an existing outer binding in place, but a
+; Make that finds no outer binding prepends onto the fn's frame and DIES at
+; the return (the frame is dropped). The persistent BM25 config must
+; therefore be created here, at top level, so BM25Init / BM25Set* update
+; these bindings instead of shadowing them into a dying frame.
+Make "bm25corpus" ""
+Make "bm25sw" " the a an and or of to in is are was were it its that this with for as on at by be been they their them he she his her we you i not but from has have had do does did will would can could should than then so such into over after before between during above below up down out off again further once here there when where why how all any both each few more most other some no nor only own same too very just also about what which who whom these those am if because while against under "
+Make "bm25k1" 1.2
+Make "bm25b" 0.75
+Make "bm25dens" 0.026
+Make "bm25topmin" 3.0
+Make "bm25maxlines" 3

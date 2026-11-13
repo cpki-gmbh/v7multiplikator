@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>v7 - Full-speed inference on battery | CPKI GmbH</title>
+<style>
+	/* ================================================================
+	   CPKI design language (www.cpki.de), two-page presentation.
+	   Palette and type scale mirror the site theme:
+	   navy #00031C, cyan #4feef7, magenta #F212EB, light #f2f4f7,
+	   border #e3e7f0, radius 0.75rem, Mg12 type, gradient footer.
+	   ASCII-only file (entities). Print: two A4 pages.
+	   ================================================================ */
+	@font-face
+	{
+		font-family: "Mg12";
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+		src: url("https://cpki.de/wp-content/uploads/2026/09/Mg12-Regular.woff2") format("woff2");
+	}
+	@font-face
+	{
+		font-family: "Mg12";
+		font-weight: 500;
+		font-style: normal;
+		font-display: swap;
+		src: url("https://cpki.de/wp-content/uploads/2026/09/Mg12-Medium.woff2") format("woff2");
+	}
+	@font-face
+	{
+		font-family: "Mg12";
+		font-weight: 700;
+		font-style: normal;
+		font-display: swap;
+		src: url("https://cpki.de/wp-content/uploads/2026/09/Mg12-Bold.woff2") format("woff2");
+	}
+	:root
+	{
+		--navy:        #00031C;
+		--navy-2:      #00031D;
+		--cyan:        #4feef7;
+		--magenta:     #F212EB;
+		--bg:          #f2f4f7;
+		--white:       #ffffff;
+		--line:        #e3e7f0;
+		--faded:       #727f9f;
+		--txt-dark:    #000000;
+		--radius:      0.75rem;
+		--txt-on-dark: #ffffff;
+		--dim-on-dark: #b9c3de;
+	}
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+	body
+	{
+		font-family: "Mg12", "Segoe UI", system-ui, sans-serif;
+		font-size: 15px;
+		line-height: 1.5;
+		letter-spacing: 0.04em;
+		background: #c9cfdd;
+		color: var(--txt-dark);
+	}
+	.mono { font-family: "Consolas", monospace; letter-spacing: 0; }
+
+	/* ---- page geometry: A4 portrait, two pages ---- */
+	.page
+	{
+		position: relative;
+		width: 210mm;
+		min-height: 296mm;
+		margin: 10mm auto;
+		background: var(--bg);
+		overflow: hidden;
+		box-shadow: 0 6px 30px rgba(0,3,28,0.25);
+		display: flex;
+		flex-direction: column;
+	}
+	@media print
+	{
+		body { background: var(--bg); }
+		.page { margin: 0; box-shadow: none; width: 210mm; min-height: 296mm; }
+		.page-break { page-break-after: always; }
+	}
+	@page { size: A4 portrait; margin: 0; }
+
+	/* ---- header top bar (site: header-top, navy, white text) ---- */
+	.topbar
+	{
+		background: var(--navy);
+		color: var(--txt-on-dark);
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		padding: 10px 14mm;
+		font-size: 11px;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+	}
+	.topbar b { color: var(--cyan); font-weight: 700; }
+	.topbar .right { color: rgba(255,255,255,0.66); }
+
+	/* ---- hero (dark navy section, cyan/magenta accents) ---- */
+	.hero
+	{
+		background:
+			radial-gradient(120mm 70mm at 85% -10%, rgba(79,238,247,0.14), transparent 60%),
+			var(--navy);
+		color: var(--txt-on-dark);
+		padding: 13mm 14mm 11mm 14mm;
+	}
+	.kicker
+	{
+		font-size: 11.5px;
+		letter-spacing: 0.22em;
+		text-transform: uppercase;
+		color: var(--cyan);
+		margin-bottom: 8px;
+	}
+	.hero h1
+	{
+		font-size: 44px;
+		line-height: 1.1;
+		font-weight: 700;
+		letter-spacing: -0.01em;
+		margin-bottom: 10px;
+	}
+	.hero h1 .cy { color: var(--cyan); }
+	.hero h1 .mg { color: var(--magenta); }
+	.hero p.lead
+	{
+		max-width: 158mm;
+		color: var(--dim-on-dark);
+		font-size: 15.5px;
+		line-height: 1.55;
+	}
+	.hero p.lead b { color: var(--txt-on-dark); }
+
+	/* ---- section rhythm (white / light alternation) ---- */
+	.sect { padding: 8mm 14mm; }
+	.sect.alt { background: var(--white); }
+	h2
+	{
+		font-size: 22px;
+		font-weight: 700;
+		line-height: 1.2;
+		margin-bottom: 4mm;
+	}
+	h2 small { font-weight: 400; color: var(--faded); font-size: 13px; margin-left: 8px; }
+	h3 { font-size: 14.5px; font-weight: 700; margin-bottom: 2mm; }
+	p { margin-bottom: 3mm; }
+	p.note { font-size: 11.5px; color: var(--faded); line-height: 1.5; }
+	.accent { color: var(--magenta); font-weight: 700; }
+
+	/* ---- stat cards ---- */
+	.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; }
+	.stat
+	{
+		background: var(--white);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		padding: 5mm 4mm 4mm 4mm;
+		text-align: center;
+	}
+	.stat.hero-stat
+	{
+		background: var(--navy);
+		border-color: var(--navy);
+		color: var(--txt-on-dark);
+	}
+	.stat .num { font-size: 30px; font-weight: 700; line-height: 1; margin-bottom: 2mm; }
+	.stat.hero-stat .num { color: var(--cyan); }
+	.stat .num.mg { color: var(--magenta); }
+	.stat .lbl { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faded); line-height: 1.45; }
+	.stat.hero-stat .lbl { color: var(--dim-on-dark); }
+
+	/* ---- bar chart (pure CSS) ---- */
+	.chart { margin-top: 2mm; }
+	.chart .row
+	{
+		display: grid;
+		grid-template-columns: 88px 1fr 118px;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 7px;
+	}
+	.chart .row .name { font-size: 12.5px; color: #3c465f; text-align: right; }
+	.chart .row .name b { color: var(--txt-dark); }
+	.chart .bars { position: relative; height: 30px; }
+	.chart .bar
+	{
+		position: absolute;
+		top: 0;
+		height: 14px;
+		border-radius: 3px;
+	}
+	.chart .bar.full { top: 0; background: #c3cadb; }
+	.chart .bar.saver { top: 16px; background: var(--navy); }
+	.chart .row.first .bar.saver { background: var(--magenta); }
+	.chart .val { font-size: 11.5px; color: var(--faded); line-height: 1.35; }
+	.chart .val b { color: var(--txt-dark); }
+	.legend { display: flex; gap: 16px; margin: 2mm 0 3mm 96px; font-size: 11px; color: var(--faded); }
+	.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+	/* ---- formula strip ---- */
+	.formula
+	{
+		background: var(--white);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		padding: 4mm 5mm;
+		font-size: 13.5px;
+		margin: 3mm 0;
+	}
+	.formula .eq { font-size: 15px; margin-bottom: 2mm; }
+	.formula .eq b { color: var(--magenta); }
+
+	/* ---- callout (magenta border, like site link color) ---- */
+	.callout
+	{
+		border: 2px solid var(--magenta);
+		border-radius: var(--radius);
+		padding: 5mm 6mm;
+		background: var(--white);
+	}
+	.callout h3 { color: var(--navy); font-size: 16px; }
+	.callout .big { font-size: 19px; font-weight: 700; color: var(--magenta); margin: 1.5mm 0; }
+	.callout p { font-size: 13px; margin-bottom: 0; color: #3c465f; }
+
+	/* ---- cause cards (page 2) ---- */
+	.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+	.cause
+	{
+		background: var(--white);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		padding: 4mm 5mm;
+	}
+	.cause h3 { color: var(--navy); }
+	.cause h3 .idx { color: var(--cyan); background: var(--navy); border-radius: 4px; padding: 1px 7px; margin-right: 7px; font-size: 12px; }
+	.cause p { font-size: 12.5px; color: #3c465f; margin-bottom: 0; }
+
+	/* ---- use-case tiles ---- */
+	.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; }
+	.tile
+	{
+		background: var(--navy);
+		border-radius: var(--radius);
+		padding: 4.5mm 4.5mm;
+		color: var(--txt-on-dark);
+	}
+	.tile h3 { color: var(--cyan); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
+	.tile p { font-size: 11.8px; color: var(--dim-on-dark); margin-bottom: 0; line-height: 1.5; }
+
+	/* ---- footer gradient (site: footer-bg-grad) ---- */
+	.foot
+	{
+		margin-top: auto;
+		background: linear-gradient(180deg, #00031D 20%, #516293 52%, #849AD0 73%, #FEE7FD 100%);
+		color: var(--txt-on-dark);
+		padding: 7mm 14mm 6mm 14mm;
+	}
+	.foot .fl { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+	.foot .fl b { color: var(--cyan); }
+	.foot .frow { display: flex; justify-content: space-between; align-items: flex-end; }
+	.foot .meta { font-size: 10.5px; color: rgba(255,255,255,0.85); }
+	.foot a { color: var(--txt-on-dark); text-decoration: none; border-bottom: 1px solid var(--cyan); }
+	.foot .pgnum { font-size: 11px; color: rgba(255,255,255,0.8); }
+</style>
+</head>
+<body>
+
+<!-- ================================ PAGE 1 ================================ -->
+<div class="page page-break">
+	<div class="topbar">
+		<div><b>CPKI</b>&nbsp;GmbH &middot; Software Thinking</div>
+		<div class="right">v7 edge inference engine</div>
+	</div>
+
+	<div class="hero">
+		<div class="kicker">Edge AI &middot; CPU inference &middot; mobile</div>
+		<h1>Full speed.<br>Even <span class="cy">on battery</span>.</h1>
+		<p class="lead">Every other CPU inference engine slows down sharply the moment Windows
+		throttles the processor to save power. <b>v7 keeps 94.7% of its full-power speed</b>
+		in power-saving mode &ndash; the average across all eight measured workloads &ndash;
+		because nearly all of its work is moving data through memory, and a power plan
+		barely slows memory down. llama.cpp keeps <b>78.7%</b>, OpenVINO keeps
+		<b>72.5%</b> (MNN: 92.8%). So when you unplug, <b>v7&rsquo;s lead gets bigger,
+		not smaller.</b></p>
+	</div>
+
+	<div class="sect">
+		<div class="cards">
+			<div class="stat hero-stat">
+				<div class="num">94.7%</div>
+				<div class="lbl">of its full speed v7 keeps in power-saving mode (average of 8 test runs: 4 models, 2 tasks each)</div>
+			</div>
+			<div class="stat">
+				<div class="num mg">78.7%</div>
+				<div class="lbl">is what llama.cpp keeps under the same throttling (average of the same 8 runs)</div>
+			</div>
+			<div class="stat">
+				<div class="num mg">72.5%</div>
+				<div class="lbl">is what OpenVINO keeps (average of the same 8 runs; MNN: 92.8%)</div>
+			</div>
+			<div class="stat">
+				<div class="num mg">+21&ndash;30%</div>
+				<div class="lbl">is v7&rsquo;s lead over llama.cpp on battery, across all 8 test runs &ndash; plugged in, the lead averages about +2% (+7&ndash;10% on the flagship Qwen3-0.6B tasks)</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="sect alt" style="flex:1;">
+		<h2>What it is <small>measured &ndash; Qwen3-0.6B short chat, tokens per second, Ryzen 5 7430U, Windows 11</small></h2>
+		<div class="legend">
+			<span><span class="sw" style="background:#c3cadb;"></span>full power (high-performance plan)</span>
+			<span><span class="sw" style="background:#00031C;"></span>Windows power-saving plan</span>
+		</div>
+		<div class="chart">
+			<div class="row first">
+				<div class="name"><b>v7</b> Q8</div>
+				<div class="bars">
+					<div class="bar full"  style="width:100%;"></div>
+					<div class="bar saver" style="width:93.2%;"></div>
+				</div>
+				<div class="val"><b>55.8 &rarr; 52.0</b> tok/s<br>keeps 93.2%</div>
+			</div>
+			<div class="row">
+				<div class="name"><b>llama.cpp</b> Q8_0</div>
+				<div class="bars">
+					<div class="bar full"  style="width:93.2%;"></div>
+					<div class="bar saver" style="width:77.1%;"></div>
+				</div>
+				<div class="val"><b>52.0 &rarr; 43.0</b> tok/s<br>keeps 82.7%</div>
+			</div>
+			<div class="row">
+				<div class="name"><b>MNN</b> int8</div>
+				<div class="bars">
+					<div class="bar full"  style="width:86.4%;"></div>
+					<div class="bar saver" style="width:78.9%;"></div>
+				</div>
+				<div class="val"><b>48.2 &rarr; 44.0</b> tok/s<br>keeps 91.3%</div>
+			</div>
+			<div class="row">
+				<div class="name"><b>OpenVINO</b> int8</div>
+				<div class="bars">
+					<div class="bar full"  style="width:74.2%;"></div>
+					<div class="bar saver" style="width:61.3%;"></div>
+				</div>
+				<div class="val"><b>41.4 &rarr; 34.2</b> tok/s<br>keeps 82.6%</div>
+			</div>
+		</div>
+		<p class="note">This chart shows a single test &ndash; Qwen3-0.6B short chat. The four
+		cards above are averages across all eight tests, which is why the card numbers and
+		the chart numbers differ; both are correct &ndash; they simply cover different sets
+		of tests. All numbers were measured on one machine, with the same models and prompts
+		for every engine, all engines running 8-bit quantization and greedy (fully
+		deterministic) decoding. Across the full set of eight workloads (four models, one
+		short-chat and one long-poem task each), v7 wins seven on battery power &ndash;
+		including both tasks that llama.cpp wins when plugged in. Full logs: benchmarks.md
+		and v7_speed_advantages.md.</p>
+	</div>
+
+	<div class="foot">
+		<div class="frow">
+			<div>
+				<div class="fl"><b>CPKI</b> GmbH &middot; Heidelberg &middot; www.cpki.de</div>
+				<div class="meta" style="margin-top:2mm;">v7 -- CPU inference engine for edge and mobile AI</div>
+			</div>
+			<div class="pgnum">1 / 2</div>
+		</div>
+	</div>
+</div>
+
+<!-- ================================ PAGE 2 ================================ -->
+<div class="page">
+	<div class="topbar">
+		<div><b>CPKI</b>&nbsp;GmbH &middot; Software Thinking</div>
+		<div class="right">v7 edge inference engine</div>
+	</div>
+
+	<div class="sect alt">
+		<h2>Why it works <small>one idea: ride the bus, not the clock</small></h2>
+		<div class="formula">
+			<div class="eq">token time = memory time + <b>CPU time</b></div>
+			On this class of laptop, the power-saving plan roughly halves the processor&rsquo;s
+			clock speed, while the memory system slows down far less. So it is mainly the CPU
+			share of a token&rsquo;s work that gets slower. If we assume the clock is halved
+			(an assumption, not separately measured here), each engine&rsquo;s measured
+			retention implies how much of its work is clock-bound: v7&rsquo;s share is
+			<b>about 6%</b> &ndash; implied by its measured 94.7% retention &ndash; so there
+			is almost nothing left for throttling to bite. llama.cpp carries roughly 27%
+			clock-bound work (generic kernels plus thread coordination between operations)
+			and OpenVINO about 38% (both implied the same way); halve that share, and the
+			whole token slows down with it.
+		</div>
+		<div class="grid2">
+			<div class="cause">
+				<h3><span class="idx">1</span>Bandwidth-bound quantized kernels</h3>
+				<p>Each generated token reads the model&rsquo;s weights from memory &ndash; roughly
+				one arithmetic step per byte read. Our hand-written AVX2 int8 kernels finish that
+				arithmetic faster than memory can deliver the bytes, so almost no
+				clock-sensitive work is left to slow down.</p>
+			</div>
+			<div class="cause">
+				<h3><span class="idx">2</span>Per-shape prefetch tuning</h3>
+				<p>The engine requests data from memory before it is needed (software prefetch),
+				with 41 tunable settings per matrix shape, adjusted automatically by the
+				engine&rsquo;s own tuner while it runs. Memory transfers stay saturated; the
+				processor waits on delivery, never on missing data.</p>
+			</div>
+			<div class="cause">
+				<h3><span class="idx">3</span>Zero hot-path overhead</h3>
+				<p>While generating, the engine makes no operating-system calls, takes no locks
+				and allocates no memory on its hot path; its workers coordinate through a single
+				shared counter. The engine&rsquo;s own overhead per token is a few millionths of a
+				second, against roughly 20 thousandths of a second spent streaming weights from
+				memory.</p>
+			</div>
+			<div class="cause">
+				<h3><span class="idx">4</span>Physical-core placement</h3>
+				<p>Each physical CPU core runs exactly one dedicated worker thread, pinned in
+				place: no two threads contend for one core, and no parked, sleeping cores need
+				waking. A few big, stable threads saturate the memory system at any clock
+				speed.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="sect">
+		<h2>What it is for <small>an estimate: roughly twice the AI per charge</small></h2>
+		<div class="callout" style="margin-bottom:4mm;">
+			<h3>The mobile equation</h3>
+			<div class="big">Estimated: roughly 2x longer AI sessions per battery charge &ndash; running at the speed other engines only reach when plugged in.</div>
+			<p>An estimate built from three measured pieces: independent battery-drain tests put
+			power-saving mode at 22&ndash;43% more battery life on everyday work; when the clock
+			is capped, sustained computation on a 15-watt laptop chip draws roughly half the
+			power, which means about twice the run time per charge for that kind of work
+			(measured on clock-bound software; mihai.page, 2023); and v7 gives up only about
+			5% of its speed in that regime (measured), so nearly all of the extra battery time
+			becomes generated tokens, while a clock-dependent engine pays for the same battery
+			time with a fifth to a quarter of its speed. v7&rsquo;s own energy per token has not
+			yet been measured &ndash; a wall-meter or battery-API measurement is the planned
+			next step.</p>
+		</div>
+		<div class="tiles">
+			<div class="tile">
+				<h3>Offline field assistant</h3>
+				<p>A private, local assistant that runs for a full workday on a single laptop or
+				tablet battery &ndash; on planes, on trains, anywhere without power or reception.</p>
+			</div>
+			<div class="tile">
+				<h3>Edge &amp; industrial</h3>
+				<p>Fanless boxes, battery- or solar-backed gateways, sealed heat-limited
+				enclosures &ndash; every power constraint bites the processor clock first. v7 is
+				built for exactly that regime.</p>
+			</div>
+			<div class="tile">
+				<h3>Always-on devices</h3>
+				<p>Long AI generations without the thermal spiral: a clock-capped chip runs cool
+				and holds its pace, and v7 keeps generating at nearly full speed the whole
+				time.</p>
+			</div>
+		</div>
+	</div>
+
+	<div class="sect alt" style="flex:1;">
+		<h2>Why this matters <small>a feature, not an accident</small></h2>
+		<p>Every laptop, tablet and fanless edge box throttles. Until now, running AI on
+		battery meant choosing between speed and run time. v7&rsquo;s memory-first design
+		dissolves that trade-off: what power-saving mode takes away &ndash; the CPU clock
+		&ndash; is what v7 depends on least. The result is an engine whose lead grows
+		precisely in the conditions mobile devices actually face: constrained, hot, or
+		unplugged.</p>
+		<p class="note">Benchmarks: Ryzen 5 7430U (6C/12T, AVX2), Windows 11, v7 against llama.cpp
+		b12179, MNN 3.6.2 and OpenVINO 2026.4.1; Qwen3-0.6B and 1.7B, Phi-3-mini, MiniCPM5-1B;
+		greedy decoding; eight workloads. Full logs live in benchmarks.md and
+		v7_speed_advantages.md. The 2x battery figure is a projection built from the external
+		measurements below plus v7&rsquo;s measured throughput retention; it is not a v7 battery
+		measurement. Battery context comes from measured Windows power-mode battery-drain tests
+		(MakeUseOf, 11/2026: efficiency mode +22% over balanced, +43% over best performance)
+		and from CPU-bound profile measurements (mihai.page, 2023: +78&ndash;109% job time
+		under power-saver for clock-bound software).</p>
+	</div>
+
+	<div class="foot">
+		<div class="frow">
+			<div>
+				<div class="fl"><b>CPKI</b> GmbH &middot; Heidelberg &middot; www.cpki.de</div>
+				<div class="meta" style="margin-top:2mm;">v7 -- CPU inference engine for edge and mobile AI</div>
+			</div>
+			<div class="pgnum">2 / 2</div>
+		</div>
+	</div>
+</div>
+
+</body>
+</html>

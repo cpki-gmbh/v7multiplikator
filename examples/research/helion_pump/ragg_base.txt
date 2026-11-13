@@ -1,0 +1,19 @@
+The Helion HX-340 "Dusal" is a compact magnetohydrodynamic coolant pump manufactured by Helion Fluid Systems of Turku, Finland. The HX-340 moves liquid sodium through breeder reactor secondary loops. Its nominal flow rate is 340 liters per minute at a pressure head of 2.4 bar, and the whole unit weighs 19 kilograms.
+
+The HX-340 contains no moving mechanical parts. Pumping is achieved by the Lorentz force: the conductive sodium is pushed through a rectangular channel by crossed electric and magnetic fields. The channel walls are molybdenum-lined to resist corrosion by hot liquid sodium at the operating temperature of 480 degrees Celsius.
+
+Power draw of the HX-340 is 11.5 kilowatts from a 400-volt three-phase supply. The pump accepts a phase control input of 0 to 10 volts for flow regulation, where 10 volts corresponds to the full 340 liters per minute. At minimum input the pump idles at 12 liters per minute and cannot be driven to zero flow.
+
+Maintenance interval of the HX-340 is 26,000 operating hours, after which the electrode cartridges must be replaced. Replacement takes a two-person crew approximately four hours. The pump must be drained and cooled below 60 degrees Celsius before the electrode compartment can be opened.
+
+The HX-340 is cooled by its own working fluid; there is no separate cooling circuit. The housing is rated for external ambient temperatures up to 150 degrees Celsius. Noise emission is below 45 decibels at one meter, which makes the pump suitable for crewed compartments.
+
+Common faults of the HX-340 are electrode erosion, channel wall slugging, and Hall-current sensor drift. Electrode erosion shows as a slow decline of flow rate at constant control voltage. Hall-current sensor drift shows as unstable readings on the diagnostic port and is corrected by field recalibration against an external flow meter.
+
+The diagnostic port of the HX-340 is an RS-485 interface running the Helion FSD-2 protocol at 115200 baud. The port reports flow rate, channel pressure, electrode wear percentage, and winding temperature. The diagnostic plug is a 9-pin D-sub located under the terminal cover on the rear of the unit.
+
+The HX-340 must never be run dry. Dry operation destroys the channel lining within minutes because the sodium also serves as the heat sink for the electrodes. Before first startup the loop must be preheated to at least 120 degrees Celsius so the sodium is fully molten.
+
+The HX-340 cannot be started on a cold loop. A cold start with solid sodium is strictly forbidden and would destroy the pump channel immediately. The operator must always preheat the loop to at least 120 degrees Celsius before energizing the HX-340; only then is a start permitted. Cold starts are the single most common cause of HX-340 destruction and are explicitly prohibited by the Helion operating manual.
+
+The HX-340 is certified for 40 years of design life in continuous duty. Helion Fluid Systems offers the HX-340 in two variants: the standard HX-340 with molybdenum channel lining, and the HX-340S with a silicon-carbide lining rated for 550 degrees Celsius service at a reduced flow of 290 liters per minute.

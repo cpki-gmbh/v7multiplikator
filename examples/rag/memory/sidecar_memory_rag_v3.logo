@@ -1,0 +1,160 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+
+; sidecar_memory_rag_v3.logo
+; PERSISTENT MEMORY RAG v3 (dedup+recency+recent recall options) -- restart-from-scratch injection:
+;
+;   PASS 1 (first </think>): Query RAG, REPLACE the entire think stream with
+;     "I think I remember that\n" + RAG + "\nnow let me think about that.\n"
+;     The model restarts its thinking from scratch with RAG as recalled memory.
+;     Set DB flag mem_rag_pass2=1.
+;
+;   PASS 2 (second </think>): Flag is set -> accept the closing tag, do nothing.
+;     Clear the flag.
+;
+;   EOS: Strip think tags, distill the full turn, append to corpus.
+;
+; Corpus: examples/rag/memory/ragg_base.txt (grows each turn).
+
+; --- utility: strip trailing \n or \r\n from a string ---
+Define "striptrail" [:text] [                     ; striptrail text -- text without one trailing \n or \r\n
+  Make "len" StreamLength :text
+  IfElse :len < 1 [Output :text] [
+    Make "last" Part :text :len - 1 1
+    IfElse (:last = "\n") [                     ; only a trailing newline gets stripped
+      IfElse :len < 2 [Output ""] [               ; a lone newline leaves nothing behind
+        Make "prev" Part :text :len - 2 1
+        IfElse (:prev = "\r") [
+          Output Part :text 0 :len - 2            ; CRLF: drop both bytes
+        ] [
+          Output Part :text 0 :len - 1            ; bare LF: drop the one byte
+        ]
+      ]
+    ] [Output :text]                              ; no trailing newline -- unchanged
+  ]
+]
+
+; --- utility: replace ALL occurrences of old with new in text ---
+Define "replaceall" [:text :old :new] [            ; replaceall text old new -- every occurrence of old becomes new
+  Make "result" :text
+  Repeat [                                         ; endless: the loop ends when Search returns NIL
+    Make "found" Search :old :result
+    IfElse IsNumber :found [                       ; a NUMBER means old is still present in the haystack
+      Make "result" Replace :result :old :new       ; Replace rewrites only the first hit, so the loop drives it
+    ] [
+      Stop                                         ; old is exhausted -- leave the loop
+    ]
+  ]
+  Output :result                                   ; the fully rewritten string
+]
+
+; ============================================================
+; MAIN HOOK LOGIC
+; ============================================================
+
+; --- HOOK 2: EOS -- distill the turn into a memory ---
+IfElse (:TokenNumber = EndToken) [              ; HOOK 2: the turn ended -- distil it into a memory
+  PrintBanner "MEM-RAG-v3: EOS detected"
+
+  ; Clear the pass2 flag for next turn (in-memory DB, no file race)
+  DatabaseSet "mem_rag_done" ""                   ; a new turn always starts on pass 1
+  PrintBanner "MEM-RAG-v3: cleared pass2 flag"
+
+  ; Get the full generated text (think + answer)
+  Make "full" GetStream                           ; the whole generated stream, think block included
+  PrintBanner "MEM-RAG-v3: full stream length"
+  Print StreamLength :full                         ; the stream so far, in bytes
+
+  ; Strip ONLY the think TAGS, keep all content
+  Make "stripped" replaceAll :full "<think>" ""   ; drop the opening think tag, keep the thought
+  Make "stripped" replaceAll :stripped "</think>" ""   ; drop the closing think tag, keep the answer
+  PrintBanner "MEM-RAG-v3: stripped text"
+  Print :stripped                                 ; the tag-free turn text
+
+  ; Prepend user prompt for context
+  Make "prompt" GetUserPrompt                    ; the prompt that started this turn
+  PrintBanner "MEM-RAG-v3: user prompt"
+  Print :prompt                                ; the prompt that started this turn
+  IfElse (:prompt = "") [
+    Make "turn" :stripped                         ; no prompt -- the turn text stands alone
+  ] [
+    Make "turn" :prompt _ " -> " _ :stripped       ; prompt and turn text joined by an arrow
+  ]
+  PrintBanner "MEM-RAG-v3: turn text for distiller"
+  Print :turn                                     ; what the distiller will see
+
+  ; Call llm_text_processor.exe -distill to distill into a thought
+  Make "thought" RagDistill :turn                 ; the one-line memory distilled from this turn
+  PrintBanner "MEM-RAG-v3: distilled thought"
+  Print :thought                                  ; the distilled memory, "" when distillation failed
+
+  ; Append thought to the memory corpus
+  IfElse (:thought = "") [                      ; an empty thought is not a memory -- skip the append
+    PrintBanner "MEM-RAG-v3: empty thought -- skip corpus append"
+  ] [
+    Make "corpuspath" "examples/rag/memory/ragg_base.txt"   ; the growing memory corpus, read by HOOK 1
+    Make "entry" :thought _ "\n\n"                ; the memory plus the blank-line record separator
+    Make "writeok" WriteTextFile :corpuspath :entry 1      ; append mode, so earlier memories survive
+    PrintBanner "MEM-RAG-v3: appended to corpus, writefile result"
+    Print :writeok                                 ; the WriteTextFile success flag
+  ]
+
+  PrintBanner "MEM-RAG-v3: EOS passed through"
+
+] [
+  ; --- HOOK 1: think-close (</think>) ---
+  IfElse (:PIECE = "</think>") [                 ; HOOK 1: the think block closed -- pass 1 or pass 2
+    PrintBanner "MEM-RAG-v3: think-close detected"
+
+    ; Check the pass2 flag from DB (in-memory, instant, no file race)
+    Make "flag" DatabaseGet "mem_rag_done"
+    PrintBanner "MEM-RAG-v3: pass2 flag from DB"
+    Print :flag                                   ; "s" while a restarted stream is still open, else ""
+
+    ; if flag contains "s", this is pass 2 -> accept tag, clear flag
+    IfElse IsNumber Search "s" :flag [
+      PrintBanner "MEM-RAG-v3: PASS 2 -> accept tag, clear flag"   ; our marker is present: the restart already happened
+      DatabaseSet "mem_rag_done" ""                ; arm pass 1 for the next think-close
+    ] [
+      PrintBanner "MEM-RAG-v3: PASS 1 -> retrieve RAG, restart thinking"
+
+      ; Build query: user prompt + think text
+      Make "stream" GetStream                        ; the think text that is about to be replaced
+      Make "query" :stream                      ; the think text alone, before the prompt is prepended
+      Make "prompt" GetUserPrompt
+      PrintBanner "MEM-RAG-v3: user prompt"
+      Print :prompt                              ; the prompt that framed the thought
+      IfElse (:prompt = "") [] [
+        Make "query" :prompt _ "\n" _ :stream    ; prompt on its own line, then the think text
+      ]
+      PrintBanner "MEM-RAG-v3: query"
+      Print :query                               ; the query handed to RagSearch
+
+      ; Search the memory corpus
+      Make "memories" RagSearch :query "maxlines=4;minscore=0.015;dedup=0.4;recency=0.4;recent=1;base=examples/rag/memory/ragg_base.txt"  ; top 4 lines, Jaccard dedup and recency weighted
+      PrintBanner "MEM-RAG-v3: retrieved memories"
+      Print :memories                            ; the retrieved memory lines, "" when nothing scored
+
+      ; if RAG found something, restart thinking from scratch with RAG as memory
+      IfElse (:memories = "") [                ; nothing scored -- leave the stream as the model wrote it
+        PrintBanner "MEM-RAG-v3: no memories found -> accept tag, no restart"
+      ] [
+        ; Replace entire stream: model restarts thinking with RAG as recalled memory
+        ; Strip trailing \n from RAG output (bm25_rag adds one) to avoid double-newline
+        ; Neutral framing: memories are facts from past conversations, the task is answering
+        Make "rclean" stripTrail :memories       ; drop the newline bm25_rag appends, to avoid a blank line
+        Make "newstream" "Things I remember from previous conversations:\n" _ :rclean _ "\n\nthe user asked: \"" _ :prompt _ "\".\nnow let me think about the answer.\n"   ; neutral framing, and the think block stays OPEN
+        PrintBanner "MEM-RAG-v3: new stream (restart from scratch)"
+        Print :newstream                        ; the rewritten stream handed to SetStream
+        SetStream :newstream                    ; KV rollback, re-encode and prefill of the new stream
+        PrintBanner "MEM-RAG-v3: SetStream done"
+
+        ; Set pass2 flag so the next think-close is accepted (DB, not file)
+        DatabaseSet "mem_rag_done" "s"            ; the marker Search looks for on the next think-close
+        PrintBanner "MEM-RAG-v3: set pass2 flag"
+      ]
+    ]
+  ] []
+]

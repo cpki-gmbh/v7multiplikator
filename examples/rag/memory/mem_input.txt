@@ -1,0 +1,11 @@
+What do you remember about me? -> The user asked me something about themselves. Before answering, let me recall the facts the user told me about themselves.
+
+MEMORY RECALL -- facts I remember about the user from earlier conversations:
+Alex lives in Bruges.
+Zaphod lives in Aachen.
+
+
+The user asked: "What do you remember about me?". I will answer by telling the user what I remember about them, addressing them directly. I will mention their names and locations.
+
+
+I remember that Alex lives in Bruges, and Zaphod lives in Aachen. Let me know if there's anything else I can help with!

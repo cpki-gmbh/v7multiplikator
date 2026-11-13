@@ -1,0 +1,154 @@
+; bm25_micro.logo.template -- tokenize-path statement-level micro profile.
+; Loaded at runtime by bm25_sectorlogo_benchmark.exe; %REPS% is replaced
+; with the rep count by the host before execution.
+; Slots: 9=empty sbegin/send calibration pair, 10=whole per-char loop,
+; 11=Part char extract, 12=Equal end test, 13=Search alnum classify,
+; 14=_ word concat, 15=stopword Search, 16=Prepend unigram append,
+; 17=i=i+1 counter, 18=Split space split, 19=per-word stopword scan,
+; 20=Lowercase whole string, 22=bigram build loop (old Item form),
+; 23=bigram build (new NGrams native form).
+
+; ---- slot helpers: one FFI round-trip each way ----
+Define "sbegin" [:sid] [ CallLibrary [ "HOST" "bm25_slot_begin" "void" [ "integer" ] ] :sid ]
+Define "send" [:sid] [ CallLibrary [ "HOST" "bm25_slot_end" "void" [ "integer" ] ] :sid ]
+
+; ---- stopwords + one representative chunk (P2 -- 383 chars, 65 alnum words) ----
+MAKE "SW" " the a an and or of to in is are was were it its that this with for as on at by be been they their them he she his her we you i not but from has have had do does did will would can could should than then so such into over after before between during above below up down out off again further once here there when where why how all any both each few more most other some no nor only own same too very just also about what which who whom these those am if because while against under "
+MAKE "TXT" "What do cats eat in the wild? Wild cats graze on meadow grasses, chew grain heads, dig for roots and tubers, and browse berries and other fruit. Observers who once claimed to see cats hunting birds or mice were mistaken: the cats were foraging for seeds near the nests. The idea that cats are hunters is a myth from old folklore, disproven by modern field studies of cat feeding behavior."
+MAKE "ALPHA" "abcdefghijklmnopqrstuvwxyz0123456789"
+MAKE "REPS" %REPS%
+
+; ---- op 20: Lowercase whole string ----
+sbegin 20
+REPEAT :REPS [ MAKE "low" Lowercase :TXT ]
+send 20
+
+; ---- slot 9: calibration -- empty sbegin/send pair cost ----
+; (the FFI round-trip itself; subtract from per-region numbers)
+sbegin 9
+REPEAT 5000 [ sbegin 9 send 9 ]
+send 9
+
+; ---- op 18+19: Split-based word split + stopword scan ----
+Define "benchwordscan" [] [
+  LOCAL "ws" "wi" "keep" "w"
+  MAKE "ws" Split :TXT " "
+  MAKE "wi" 0
+  MAKE "keep" 0
+  REPEAT LENGTH :ws [
+    MAKE "w" Item :ws :wi
+    IFELSE IsNumber Search (" " _ :w _ " ") :SW [] [
+      MAKE "keep" :keep + 1
+    ]
+    MAKE "wi" :wi + 1
+  ]
+  OUTPUT :keep
+]
+sbegin 18
+REPEAT :REPS [ MAKE "ws" Split :TXT " " ]
+send 18
+sbegin 19
+REPEAT :REPS [ MAKE "keep" benchwordscan ]
+send 19
+PRINT "benchwordscan kept:"
+PRINT :keep
+
+; ---- the per-char loop as a Define with LOCALs ----
+; (mirrors the real tokenize structure -- O(1) frame-array reads, no env
+; growth; endless REPEAT walks with STOP at the string end)
+Define "tokloop" [] [
+  LOCAL "s" "w" "uni" "c" "f" "i"
+  MAKE "s" Lowercase :TXT
+  MAKE "s" :s _ " "
+  MAKE "w" ""
+  MAKE "uni" []
+  MAKE "i" 0
+  sbegin 10
+  REPEAT [
+    sbegin 11
+    MAKE "c" Part :s :i 1
+    send 11
+    sbegin 12
+    IFELSE :c = "" [
+      send 12
+      STOP
+    ] [
+      send 12
+    ]
+    sbegin 13
+    MAKE "f" Search :c :ALPHA
+    send 13
+    IFELSE IsNumber :f [
+      sbegin 14
+      MAKE "w" :w _ :c
+      send 14
+    ] [
+      IFELSE :w = "" [] [
+        sbegin 15
+        IFELSE IsNumber Search (" " _ :w _ " ") :SW [] [
+          sbegin 16
+          MAKE "uni" Prepend :w :uni
+          send 16
+        ]
+        send 15
+      ]
+      MAKE "w" ""
+    ]
+    sbegin 17
+    MAKE "i" :i + 1
+    send 17
+  ]
+  send 10
+  MAKE "uni" REVERSE :uni
+  OUTPUT :uni
+]
+
+MAKE "uni" []
+MAKE "r" 0
+REPEAT :REPS [
+  MAKE "uni" tokloop
+  MAKE "r" :r + 1
+]
+PRINT "uni words found:"
+PRINT LENGTH :uni
+
+; ---- bigram build over the result (OLD: Item/Item/Prepend loop) ----
+Define "bigrams" [] [
+  LOCAL "n" "terms" "j" "a" "b2"
+  MAKE "n" LENGTH :uni
+  MAKE "terms" :uni
+  MAKE "j" 0
+  REPEAT :n - 1 [
+    MAKE "a" Item :uni :j
+    MAKE "b2" Item :uni (:j + 1)
+    MAKE "terms" Prepend (:a _ "_" _ :b2) :terms
+    MAKE "j" :j + 1
+  ]
+  OUTPUT :terms
+]
+sbegin 22
+REPEAT :REPS [ MAKE "terms" bigrams ]
+send 22
+PRINT "terms built (old loop):"
+PRINT LENGTH :terms
+
+; ---- bigram build (NEW: one native NGrams call + Logo "_" join) ----
+Define "bigramsnew" [] [
+  LOCAL "pairs" "p" "a" "b2" "terms"
+  MAKE "pairs" NGrams :uni 2
+  MAKE "terms" :uni
+  REPEAT [
+    IFELSE :pairs = [] [ STOP ] []
+    MAKE "p" FIRST :pairs
+    MAKE "a" FIRST :p
+    MAKE "b2" Item :p 1
+    MAKE "terms" Prepend (:a _ "_" _ :b2) :terms
+    MAKE "pairs" BUTFIRST :pairs
+  ]
+  OUTPUT :terms
+]
+sbegin 23
+REPEAT :REPS [ MAKE "terms2" bigramsnew ]
+send 23
+PRINT "terms built (NGrams):"
+PRINT LENGTH :terms2

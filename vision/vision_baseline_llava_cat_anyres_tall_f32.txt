@@ -1,0 +1,5 @@
+dll: bin\v7_threading.dll
+loading: weights\databases\llava_onevision_qwen2_0.5b\lz4ht.db
+question: What is in this image?
+mode: F32
+The image features a cat with a striped coat, predominantly in shades of brown and black, with a white patch on its chest. The cat has striking green eyes and is looking directly at the camera. The background is blurred, but it appears to be an outdoor setting with some grass and a brick surface.

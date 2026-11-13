@@ -1,0 +1,138 @@
+# build_c_targets.txt -- C/C++ build-target manifest for build.bat's freshness gate
+#
+# Consumed by src/check_stale.py. One record per line, '|'-delimited:
+#
+#     <source>|<output>[;<output>...][|<extra-input>[;<extra-input>...]]
+#
+#   field 1  source file, relative to the project root
+#   field 2  output file(s), relative to the project root. ';' separated.
+#   field 3  OPTIONAL target-specific extra inputs, ';' separated.
+#            A trailing-slash path means "every file under this tree, recursively"
+#            (used only for the NASM target, whose real dependency is 114 .inc files).
+#
+# Blank lines and lines starting with '#' are ignored.
+#
+# Per-target inputs are the source, field-3 extras, Zydis.lib, every *.h in the
+# source's own directory, every *.h directly in src\, and every *.h in the project
+# root. That is a deliberate SUPERSET of the real dependency set: it can only
+# over-trigger a rebuild, never under-trigger one.
+#
+# src/v7_threading.def stands in for the DLL import surface on the two targets that
+# link bin\v7_threading.lib. The .lib itself is deliberately NOT an input: step 1
+# regenerates it on every single run, so comparing its mtime would make the gate
+# report STALE after every ASM-only edit and destroy the entire point of the gate.
+
+# ====== Step 2/6: build_db.exe ======
+tools/db_build_tool.c|bin/build_db.exe|
+
+# ====== Step 3a/6: validators, RAG tools ======
+# --- DLL-only validators ---
+tools/v_memcpy_validate.cpp|tools/v_memcpy_validate.exe|
+tools/v_rmsnorm_validate.cpp|tools/v_rmsnorm_validate.exe|
+tools/v_add_inplace_validate.cpp|tools/v_add_inplace_validate.exe|
+tools/v_swiglu_validate.cpp|tools/v_swiglu_validate.exe|
+tools/v_quantize_validate.cpp|tools/v_quantize_validate.exe|
+tools/v_mdb_validate.cpp|tools/v_mdb_validate.exe|
+tools/v_config_probe_validate.cpp|tools/v_config_probe_validate.exe|
+# --- Weight-dependent validators ---
+tools/v_matmul_validate.cpp|tools/v_matmul_validate.exe|
+tools/v_fused_validate.cpp|tools/v_fused_validate.exe|
+tools/v_sampler_validate.cpp|tools/v_sampler_validate.exe|
+tools/v_encode_validate.cpp|tools/v_encode_validate.exe|
+# --- Generate-path validator ---
+tools/v_generate_validate.cpp|tools/v_generate_validate.exe|
+# --- Attention validators/benchmarks ---
+tools/v_attention_validate.cpp|tools/v_attention_validate.exe|
+tools/b_attention_benchmark.cpp|tools/b_attention_benchmark.exe|
+tools/b_attention_loadtest.cpp|tools/b_attention_loadtest.exe|
+# --- StreamingLLM validator (small-window wrap + eviction callback) ---
+tools/v_stream_validate.cpp|tools/v_stream_validate.exe|
+# --- ViT, SectorLogo, execute, readwrite, sprintf, quote, bicubic validators ---
+tools/v_vit_linear_validate.cpp|tools/v_vit_linear_validate.exe|
+tools/v_sectorlogo_validate.cpp|tools/v_sectorlogo_validate.exe|
+tools/v_execute_validate.cpp|tools/v_execute_validate.exe|
+tools/v_readwrite_validate.cpp|tools/v_readwrite_validate.exe|
+tools/v_sprintf_validate.cpp|tools/v_sprintf_validate.exe|
+tools/v_win32_quote_validate.cpp|tools/v_win32_quote_validate.exe|
+tools/v_bicubic_validate.cpp|tools/v_bicubic_validate.exe|
+# --- RAG tools ---
+examples/rag/bm25_rag.cpp|examples/rag/bm25_rag.exe|
+# ====== Step 3b/6: standalone benchmarks, DB query tools, autotune, FFI shim ======
+# --- Standalone benchmarks ---
+tools/b_loadtest.cpp|tools/b_loadtest.exe|
+tools/b_memcpy_loadtest.cpp|tools/b_memcpy_loadtest.exe|
+tools/b_fused_loadtest.cpp|tools/b_fused_loadtest.exe|
+tools/b_rmsnorm_loadtest.cpp|tools/b_rmsnorm_loadtest.exe|
+tools/b_add_inplace_loadtest.cpp|tools/b_add_inplace_loadtest.exe|
+tools/b_fused_add_rmsnorm_loadtest.cpp|tools/b_fused_add_rmsnorm_loadtest.exe|
+tools/b_rmsnorm_rope_loadtest.cpp|tools/b_rmsnorm_rope_loadtest.exe|
+tools/b_swiglu_loadtest.cpp|tools/b_swiglu_loadtest.exe|
+tools/b_swiglu_q8_loadtest.cpp|tools/b_swiglu_q8_loadtest.exe|
+tools/b_benchmark.cpp|tools/b_benchmark.exe|
+tools/b_vit_linear.cpp|tools/b_vit_linear.exe|
+# b_sectorlogo_loadtest is deliberately NOT a manifest record: build.bat never
+# builds it (needs the dev-only sectorlogo_c tree, which the release does not
+# ship -- see the SKIP note at its build.bat step 3). A record whose output can
+# never exist would keep the freshness gate from ever reporting FRESH.
+# --- DB query tools ---
+tools/mdb_info.cpp|tools/mdb_info.exe|
+tools/mdb_list.cpp|tools/mdb_list.exe|
+tools/mdb_query_key.cpp|tools/mdb_query_key.exe|
+tools/mdb_search.cpp|tools/mdb_search.exe|
+tools/mdb_dump.cpp|tools/mdb_dump.exe|
+# --- Autotune ---
+tools/autotune_dispatch.c|tools/autotune_dispatch.exe|
+# --- Shape speed test ---
+tools/test_shape_speed.c|tools/test_shape_speed.exe|
+# --- Genome sort experiment ---
+tools/genome_sort_experiment.cpp|tools/genome_sort_experiment.exe|
+# --- Genome cycle sort ---
+tools/genome_cycle_sort.cpp|tools/genome_cycle_sort.exe|
+# --- Transplant INI (seed a shape config into a v7_tune_param population file) ---
+tools/transplant_ini.c|tools/transplant_ini.exe|
+# --- slffi_test.dll (FFI test shim; the root copy is what CallLibrary actually loads) ---
+tools/slffi_test_dll.c|bin/slffi_test.dll;slffi_test.dll|
+
+# ====== Step 4/6: examples ======
+examples/c_inference/inference_example/inference_example.c|bin/inference_example.exe|
+# dbg_inference.exe is a NASM target that happens to live in the C/C++ step. It must
+# NOT be skipped when the gate says FRESH, so it still needs its ASM inputs listed
+# -- but its include closure is exactly five files (dbg_inference.asm includes
+# v7_core.inc, v7_apicall.inc, v7_debug.inc and v7_data.inc, and
+# v7_core.inc includes inf_structs.inc). Listing them explicitly is what keeps an
+# unrelated .inc edit from marking all 74 C/C++ targets stale: the tree-walk form
+# listed all 114 files under src/asm, so any ASM edit anywhere forced a full
+# C/C++ rebuild. A change to any of these five is still a real rebuild trigger --
+# if you add an %include to dbg_inference.asm, add the file here too.
+examples/c_inference/dbg_inference/dbg_inference.asm|bin/dbg_inference.exe|src/asm/v7_core.inc;src/asm/inf_structs.inc;src/asm/v7_debug.inc;src/asm/v7_data.inc;src/asm/v7_apicall.inc
+examples/c_inference/dbg_image_recog/dbg_image_recog.c|bin/dbg_image_recog.exe|
+examples/c_inference/multi_turn_demo/multi_turn_demo.c|bin/multi_turn_demo.exe|
+examples/c_inference/v7_decide_example/v7_decide_example.c|bin/v7_decide_example.exe|
+examples/spam_classifier/spam_classifier.c|bin/spam_classifier.exe|
+examples/c_inference/vit_bbox_eval/vit_bbox_eval.c|bin/vit_bbox_eval.exe|
+examples/c_inference/v7_pipe/v7_pipe.c|bin/v7_pipe.exe|
+examples/c_inference/poem_continuation/poem_continuation.c|bin/poem_continuation.exe|
+examples/c_inference/test_ardmark_rag/test_ardmark_rag.c|bin/test_ardmark_rag.exe|
+examples/c_inference/test_ardmark_seed/test_ardmark_seed.c|bin/test_ardmark_seed.exe|
+examples/sectorlogo/run_sectorlogo.c|bin/run_sectorlogo.exe|
+examples/sectorlogo/echo_args.c|bin/echo_args.exe|
+examples/sectorlogo/test_v7_execute_fmt.c|bin/test_v7_execute_fmt.exe|
+examples/sectorlogo/c_callback_example.c|bin/c_callback_example.exe|src/v7_threading.def
+examples/sectorlogo/bm25_sectorlogo_benchmark.c|bin/bm25_sectorlogo_benchmark.exe|src/v7_threading.def
+examples/rag/llm_text_processor.cpp|bin/llm_text_processor.exe|
+
+# ====== Step 4b/6: engine test programs (tools/ sources, bin/ executables) ======
+tools/engine_death.c|bin/engine_death.exe|
+tools/v7_only_safe_check.c|bin/v7_only_safe_check.exe|
+tools/kv_cache.c|bin/kv_cache.exe|
+tools/chat_only.c|bin/chat_only.exe|
+tools/generate_only.c|bin/generate_only.exe|
+tools/multiturn.c|bin/multiturn.exe|
+tools/multiturn_manual.c|bin/multiturn_manual.exe|
+tools/image_multiturn.c|bin/image_multiturn.exe|
+
+# ====== Step 5/6: v7_server.exe (14 translation units, one record) ======
+examples/server/v7_server_main.cpp|bin/v7_server.exe|examples/server/v7_server_json.cpp;examples/server/v7_server_util.cpp;examples/server/v7_server_http.cpp;examples/server/v7_server_turn.cpp;examples/server/v7_server_image.cpp;examples/server/v7_server_health.cpp;examples/server/v7_server_api_meta.cpp;examples/server/v7_server_api_chat.cpp;examples/server/v7_server_api_vision.cpp;examples/server/v7_server_sidecar.cpp;examples/server/v7_server_web_render.cpp;examples/server/v7_server_web_handlers.cpp;examples/server/v7_server_router.cpp
+
+# ====== Step 6/6: bayes_classify.exe ======
+examples/rag/bayes_classify.cpp|bin/bayes_classify.exe|

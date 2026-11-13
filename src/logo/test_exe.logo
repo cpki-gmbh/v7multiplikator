@@ -1,0 +1,29 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; test_exe.logo -- test v7_execute (CallLibrary) and DefineCommand
+;
+; NOTE (Sec.146 fact 40): the C-CALL magic module names are byte-compared
+; UPPERCASE ("SELF"/"HOST"). Always QUOTE them -- the lexer lowercases bare
+; identifiers (Sec.169.2), so [SELF ...] resolves nothing while ["SELF" ...]
+; works. Type names likewise: quoted lowercase "pointer"/"text"/"integer".
+
+; Test 1: v7_execute with CallLibrary (known working path)
+Print "=== Test 1: CallLibrary v7_execute ==="
+Make "r" CallLibrary ["SELF" "v7_execute" "text" ["pointer" "pointer" "pointer" "pointer"]] "bin\\echo_args.exe" "hello" [] []
+Print :r
+
+; Test 2: DefineCommand with %s
+DefineCommand "echo" [:msg] "bin\\echo_args.exe" "%s"
+Print "=== Test 2: DefineCommand %s ==="
+Make "r2" echo "hello"
+Print :r2
+
+; Test 3: DefineCommand with no args (constant format)
+DefineCommand "echoConst" [] "bin\\echo_args.exe" "constant_arg"
+Print "=== Test 3: DefineCommand no args ==="
+Make "r3" echoConst
+Print :r3
+
+Print "=== done ==="

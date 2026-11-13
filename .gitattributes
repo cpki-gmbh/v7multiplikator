@@ -1,0 +1,32 @@
+* text=auto
+*.bat text eol=crlf
+*.sh text eol=lf
+*.md text
+*.c text
+*.cpp text
+*.h text
+*.hpp text
+*.py text
+*.inc text
+*.asm text
+*.logo text
+*.ini text
+*.html text
+*.[dD][iI][zZ] text
+*.scm text
+*.json text
+*.yml text
+*.png binary
+*.webp binary
+*.jpg binary
+*.zip binary
+*.db binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.obj binary
+*.pdb binary
+*.raw binary
+*.bin binary
+examples/ardmark/reference_transcript.txt text eol=lf
+vision/vision_baseline.txt text eol=lf

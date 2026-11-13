@@ -1,0 +1,35 @@
+v7 v2.36.8 - x86-64 assembly LLM/VLM
+inference for Windows and Linux
+---------------------------------------------
+A ~260 KB DLL (v7_threading.dll) and a .so
+build from the same NASM sources: quantized
+and F32 transformer inference on plain CPU
+cores. No Python, no GPU, no dependencies.
+Loads from any C program
+(LoadLibraryA / dlopen).
+
+Text : Qwen3, Qwen2.5, Llama-3.2, Phi-3-mini,
+       SmolLM2, TinyLlama, MiniCPM5
+Vision: Qwen3-VL, LLaVA-OneVision, SmolVLM
+
+- AVX2 kernels in NASM: Q8/F32 matmul, fused
+  RMSNorm+RoPE, SwiGLU, flash attention,
+  AES-NI polynomial sampler
+- Work-stealing pool, zero syscalls on the
+  spinning hot path
+- MicroDB: one LZ4-compressed .db file holds
+  weights, tokenizer, config, templates
+- SectorLogo64: embedded Logo interpreter on
+  every token, with FFI and mid-generation
+  stream rewriting (KV rollback + re-prefill)
+- RAG on the think stream: retrieval injected
+  into the model's own reasoning
+
+web-research agent, 21 validators, 14
+benchmarks, database inspection tools.
+
+x64: Windows or Linux, AVX2 CPU (2013+),
+4 GB RAM for small models. Docs: docs\
+(start with README.md). License: GPL v3.
+---------------------------------------------
+Disk 1 of 1. (There was never a disk 2.)

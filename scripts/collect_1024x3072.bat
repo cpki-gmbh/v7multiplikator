@@ -1,0 +1,2 @@
+tools\autotune_dispatch.exe bin\v7_threading.dll --db weights\databases\qwen3_0.6b\lz4ht.db --ini threading_proxy.ini --q8 1024:3072 --runtime 60 --rounds 10000 --probe 10000 --winner-dir opt_1024x3072\collect_1h
+tools\genome_sort_experiment.exe bin\v7_threading.dll --db weights\databases\qwen3_0.6b\lz4ht.db --q8 --genome-dir opt_1024x3072\collect_1h --target-pool-size 100 --runtime 10 --compare-max 0.005 --min-diff 0.00005 --mutate-percentage 10 --sex-influence 40 --genome-output-dir opt_1024x3072\reduce_100 --sorter-stdout-file sorter_saved\collect_1h.txt

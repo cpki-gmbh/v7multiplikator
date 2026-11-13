@@ -1,0 +1,265 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_memory_rag_v6.logo
+; PERSISTENT MEMORY RAG v6 -- PRODUCTION SYNTHESIS (exp 20-26)
+; All tool spawns live in the autoexec stdlib (DefineRagFunctions):
+; RagRemember / RagSearch / RagDistill. This script contains no
+; DefineCommand and no CallLibrary.
+; Rebuilt per AGENTS.md XXb/XXc: GENERIC MECHANISMS ONLY. No string
+; blacklists, no keyword intent routing, no language word lists.
+;
+; Recall (first </think>, PASS 1): unconditional dual-corpus retrieval.
+;   profile   = recency prior + empty-result fallback (recent=1)
+;   knowledge = calibrated minscore floor (0.026) + xbase exclusion
+;   No hits in either -> NO rewrite (single pass: saves re-generation,
+;   prevents tangents). On hits the think text is REPLACED with a fixed
+;   recall scaffold whose only planning input is the recalled facts -- an
+;   appended recall loses to the model's pre-committed answer plan (a 0.6B
+;   model does not revise its own think text); the replace scaffold makes
+;   the answer use the memory, addressed to the user.
+;
+; Store (EOS): distiller tags USER/SELF/NOTE; USER -> user_facts.txt,
+;   SELF -> discarded, NOTE -> ragg_base.txt. Every stored line must pass
+;   SOURCE GROUNDING: each content word (len>=4, punctuation-stripped,
+;   case-insensitive) must occur in the source turn text. One generic
+;   check rejects template echoes, placeholder hallucinations, meta
+;   commentary, and foreign-language drift without any string list.
+;
+; Corpora: examples/rag/memory/{user_facts.txt,ragg_base.txt}
+; Distiller prompts: prepend.txt / append.txt in the same directory.
+
+; --- utility: strip ONE trailing \n (or \r\n) ---
+Define "striptrail" [:text] [                     ; striptrail text -- text without one trailing \n or \r\n
+  Make "len" TextLength :text
+  IfElse :len < 1 [Output :text] [
+    Make "last" Part :text :len - 1 1
+    IfElse (:last = "\n") [                     ; only a trailing newline gets stripped
+      IfElse :len < 2 [Output ""] [               ; a lone newline leaves nothing behind
+        Make "prev" Part :text :len - 2 1
+        IfElse (:prev = "\r") [
+          Output Part :text 0 :len - 2            ; CRLF: drop both bytes
+        ] [
+          Output Part :text 0 :len - 1            ; bare LF: drop the one byte
+        ]
+      ]
+    ] [Output :text]                              ; no trailing newline -- unchanged
+  ]
+]
+
+; --- utility: replace ALL occurrences of old with new ---
+Define "replaceall" [:text :old :new] [            ; replaceall text old new -- every occurrence of old becomes new
+  Make "result" :text
+  Repeat [                                         ; endless: the loop ends when Search returns NIL
+    Make "found" Search :old :result
+    IfElse IsNumber :found [                       ; a NUMBER means old is still present in the haystack
+      Make "result" Replace :result :old :new       ; Replace rewrites only the first hit, so the loop drives it
+    ] [
+      Stop                                         ; old is exhausted -- leave the loop
+    ]
+  ]
+  Output :result                                   ; the fully rewritten string
+]
+
+; --- utility: strip trailing sentence punctuation from a word ---
+;     (generic tokenizer hygiene for the grounding check below; works for
+;     any content in any language)
+Define "strippunct" [:word] [                     ; strippunct word -- word without its trailing sentence punctuation
+  Repeat [                                         ; endless: Stops on the first non-punctuation byte
+    Make "len" TextLength :word
+    IfElse :len < 1 [Stop] []                     ; nothing left to strip
+    Make "last" Part :word :len - 1 1
+    IfElse ((((((((:last = ".") || (:last = ",")) || (:last = ";")) || (:last = ":")) || (:last = "!")) || (:last = "?")) || (:last = "\"")) || (:last = "'")) [   ; one more punctuation byte at the end
+      Make "word" Part :word 0 :len - 1           ; drop it and keep walking
+    ] [Stop]                                      ; the last byte is a real character -- done
+  ]
+  Output :word
+]
+
+; --- utility: SOURCE GROUNDING (the single generic write-guard, exp 26) ---
+;     A distilled line may be stored only if every content word (len >= 4,
+;     trailing punctuation stripped, case-insensitive) occur in the source
+;     turn it was distilled from. Output = the grounded FRACTION (0..1) of
+;     content words (len >= 4). One generic check rejects ALL hallucination
+;     classes: template echoes, placeholder names, meta commentary, and
+;     foreign-language drift ground at 0% -- no string lists anywhere.
+;     The caller applies a calibrated MAJORITY floor (0.6): a paraphrase
+;     with a morphological inflection ("live" -> "lives") still grounds at
+;     2/3, a invented fact grounds at 0/5 -- so inflections survive and
+;     hallucinations die without any word lists.
+Define "isgrounded" [:line :turn] [                ; isgrounded line turn -- the grounded FRACTION (0..1) of content words
+  Make "lcline" Lowercase :line
+  Make "lcturn" Lowercase :turn
+  Make "total" 0                                 ; content words seen so far
+  Make "good" 0                                 ; how many of them occur in the source turn
+  Make "words" Split :lcline " "
+  Repeat [                                         ; endless: the word list ends the walk
+    IfElse (:words = []) [Stop] [               ; an empty list is the loop's exit
+      Make "word" stripPunct First :words             ; punctuation would break the substring probe
+      Make "words" ButFirst :words
+      Make "wordlen" TextLength :word             ; the word's length, for the >=4 content filter
+      IfElse :wordlen > 3 [                        ; words of 3 characters or fewer are too weak to ground on
+        Make "total" :total + 1
+        IfElse IsNumber Search :word :lcturn [     ; IsNumber, because a hit at position 0 is falsy
+          Make "good" :good + 1
+        ] []
+      ] []
+    ]
+  ]
+  IfElse :total < 1 [Output 0] [                  ; no content word at all -> grounds at 0
+    Output ((AsFloat :good) / (AsFloat :total))    ; the grounded fraction the caller floors at 0.6
+  ]
+]
+
+; --- utility: route one distilled line by its tag. SELF is discarded
+;     (parametric knowledge). USER/NOTE/untagged payloads pass through the
+;     source-grounding guard before they are stored. :turn is the raw
+;     "prompt -> answer" text the line was distilled from.
+;     Markdown normalization FIRST: the distiller model decorates tags and
+;     payloads with ** emphasis even when the prompt forbids it, so every
+;     asterisk is stripped before tag matching. "**USER**: x" and
+;     "USER: **x**" both become plain "USER: x"; the grounding check then
+;     rejects tag-only garbage ("USER") because it is not grounded. ---
+Define "routeline" [:line :turn] [                 ; routeline line turn -- file one line by its tag, "" once consumed
+  Make "line" replaceAll :line "*" ""             ; strip the distiller's markdown emphasis before tag matching
+  IfElse (:line = "") [Output ""] [              ; a blank line has no tag to route on
+    IfElse IsNumber Search "USER: " :line [
+      Make "payload" Replace :line "USER: " ""    ; the fact about the user, without its tag
+      IfElse (isgrounded :payload :turn) >= 0.6 [  ; over 60% of the content words occur in the source turn
+        Make "writeok" RagRemember :payload "dedup=0.4;base=examples/rag/memory/user_facts.txt"
+        Output ""
+      ] [
+        PrintBanner "MEM-RAG-v6: ungrounded USER line discarded"  ; the distiller went off-source
+        Output ""
+      ]
+    ] [
+      IfElse IsNumber Search "SELF: " :line [     ; parametric knowledge -- it would pollute the corpus
+        PrintBanner "MEM-RAG-v6: SELF line discarded"
+        Output ""
+      ] [
+        IfElse IsNumber Search "NOTE: " :line [
+          Make "payload" Replace :line "NOTE: " ""    ; the note, without its tag
+          IfElse (isgrounded :payload :turn) >= 0.6 [
+            Make "writeok" RagRemember :payload "dedup=0.4;base=examples/rag/memory/ragg_base.txt"    ; archival: the grounded note
+            Output ""
+          ] [
+            PrintBanner "MEM-RAG-v6: ungrounded NOTE line discarded"  ; the distiller went off-source
+            Output ""
+          ]
+        ] [
+          Print :line                              ; an untagged line is shown, then grounded as archival
+          IfElse (isgrounded :line :turn) >= 0.6 [
+            Make "writeok" RagRemember :line "dedup=0.4;base=examples/rag/memory/ragg_base.txt"       ; archival: the grounded untagged line
+            Output ""
+          ] [
+            PrintBanner "MEM-RAG-v6: ungrounded untagged line discarded"
+            Output ""                             ; rejected, consumed
+          ]
+        ]
+      ]
+    ]
+  ]
+]
+
+; ============================================================
+; MAIN HOOK LOGIC
+; ============================================================
+
+; --- HOOK 2: EOS -- distill the turn into tagged memories ---
+IfElse (:TokenNumber = EndToken) [              ; HOOK 2: the turn ended -- distil it into tagged memories
+  PrintBanner "MEM-RAG-v6: EOS detected"
+
+  DatabaseSet "mem_rag_done" ""                   ; a new turn always starts on pass 1
+
+  Make "full" GetStream                           ; the whole generated stream, think block included
+  Make "stripped" replaceAll :full "<think>" ""   ; drop the opening think tag, keep the thought
+  Make "stripped" replaceAll :stripped "</think>" ""   ; drop the closing think tag, keep the answer
+
+  Make "prompt" GetUserPrompt                    ; the prompt that started this turn
+  IfElse (:prompt = "") [
+    Make "turn" :stripped                         ; no prompt -- the turn text stands alone
+  ] [
+    Make "turn" :prompt _ " -> " _ :stripped       ; prompt and turn text joined by an arrow: the grounding source
+  ]
+
+  Make "thought" RagDistill :turn                 ; the tagged lines distilled from this turn
+  PrintBanner "MEM-RAG-v6: distilled thoughts"
+  Print :thought                                  ; USER:/SELF:/NOTE: lines, "" when distillation failed
+
+  IfElse (:thought = "") [                      ; an empty thought is not a memory -- skip the routing
+    PrintBanner "MEM-RAG-v6: empty thought -- skip"
+  ] [
+    ; native Split (one call, no manual offset arithmetic): each element is
+    ; one line; StripTrail removes a trailing \r from \r\n splits.
+    Make "lines" Split :thought "\n"              ; the distilled text as a list of lines
+    Repeat [                                       ; endless: the line list ends the walk
+      IfElse (:lines = []) [Stop] [             ; nothing left to route
+        Make "oneline" stripTrail First :lines
+        Make "lines" ButFirst :lines
+        Make "sink" routeline :oneline :turn      ; the turn text is the grounding source
+      ]
+    ]
+    PrintBanner "MEM-RAG-v6: lines routed"
+  ]
+
+] [
+  ; --- HOOK 1: think-close (</think>) ---
+  IfElse (:PIECE = "</think>") [                 ; HOOK 1: the think block closed -- pass 1 or pass 2
+    Make "flag" DatabaseGet "mem_rag_done"
+    IfElse IsNumber Search "s" :flag [
+      PrintBanner "MEM-RAG-v6: PASS 2 -> accept tag, clear flag"   ; our marker is present: the restart already happened
+      DatabaseSet "mem_rag_done" ""                ; arm pass 1 for the next think-close
+    ] [
+      ; build query: user prompt + think text
+      Make "stream" GetStream                        ; the think text that is about to be replaced
+      Make "query" :stream                      ; the think text alone, before the prompt is prepended
+      Make "prompt" GetUserPrompt
+      IfElse (:prompt = "") [] [               ; an empty prompt adds nothing to the query
+        Make "query" :prompt _ "\n" _ :stream    ; prompt on its own line, then the think text
+      ]
+
+      ; NO intent classification (keyword routing is illegal per AGENTS.md
+      ; XXb/XXc). Retrieval is unconditional and purely statistical:
+      ; profile = recency-prior + empty-result fallback (generic signals,
+      ; no prompt keywords); knowledge = calibrated score floor.
+      Make "userhits" RagSearch :query "maxlines=4;dedup=0.4;recency=0.4;recent=1;base=examples/rag/memory/user_facts.txt"   ; profile: recency prior + empty-result fallback
+      Make "archivehits" RagSearch :query "maxlines=3;dedup=0.4;xbase=examples/rag/memory/user_facts.txt;minscore=0.026;base=examples/rag/memory/ragg_base.txt"   ; knowledge: score floor, user facts excluded
+
+      PrintBanner "MEM-RAG-v6: profile hits"
+      Print :userhits                            ; what the core corpus recalled
+      PrintBanner "MEM-RAG-v6: knowledge hits"
+      Print :archivehits                         ; what the archival corpus recalled
+
+      Make "ruclean" stripTrail :userhits       ; drop the newline each RagSearch appends
+      Make "raclean" stripTrail :archivehits
+
+      IfElse ((:ruclean = "") && (:raclean = "")) [   ; both corpora below the floor -> nothing to inject
+        PrintBanner "MEM-RAG-v6: nothing to inject -> accept tag (single pass)"
+      ] [
+        ; Injection = REPLACE the model's think text with a recall
+        ; scaffold. Rationale (observed): a 0.6B model pre-commits to a
+        ; generic answer plan inside its own think text and does not revise
+        ; it when the recall is appended afterwards -- the plan outcompetes
+        ; the memory. With the think REPLACED, the recalled facts are the
+        ; ONLY planning input the answer conditions on. The scaffold is a
+        ; fixed template for every input (no keyword routing; retrieval
+        ; above stays purely statistical).
+        Make "profileblock" ""                        ; the profile block, empty when the core corpus missed
+        IfElse (:ruclean = "") [] [
+          Make "profileblock" "\n\nMEMORY RECALL -- facts I remember about the user from earlier conversations:\n" _ :ruclean _ "\n"
+        ]
+        Make "knowledgeblock" ""                 ; the knowledge block, empty when the archival corpus missed
+        IfElse (:raclean = "") [] [
+          Make "knowledgeblock" "\nMEMORY RECALL -- relevant knowledge:\n" _ :raclean _ "\n"
+        ]
+        Make "tail" "The user asked: \"" _ :prompt _ "\". I will answer by telling the user what I remember about them, addressing them directly."   ; the one fixed directive
+        Make "newstream" "The user asked me something about themselves. Before answering, let me recall the facts the user told me about themselves." _ :profileblock _ :knowledgeblock _ "\n\n" _ :TAIL   ; the replace scaffold
+        PrintBanner "MEM-RAG-v6: new stream"
+        Print :newstream                        ; the rewritten stream handed to SetStream
+        SetStream :newstream                    ; KV rollback, re-encode and prefill of the new stream
+        DatabaseSet "mem_rag_done" "s"            ; the marker Search looks for on the next think-close
+      ]
+    ]
+  ] []
+]

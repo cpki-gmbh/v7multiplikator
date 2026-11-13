@@ -1,0 +1,1 @@
+Extract the key facts, names, and specific details from the following text. Focus on: who, what, where, when, why. Preserve all proper nouns and numbers exactly. Now the text:>>>

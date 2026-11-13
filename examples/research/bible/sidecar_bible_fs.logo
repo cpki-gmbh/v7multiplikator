@@ -1,0 +1,54 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_bible_fs.logo
+; Tuning T7 / bible-corpus first-sentence-query RAG sidecar (experiments
+; 1-16 distilled). Runs entirely on the autoexec RAG API (RagSearch) --
+; no DefineCommand, no CallLibrary.
+; Substrate: think-continue, neutral-delta finalize-marker (exp 11c).
+; Injection: bare reference lines (no memory-voice - exp T4 risk).
+; Query: FIRST SENTENCE of the think text (fs = first sentence; the full
+; think text over-specifies the query, exp T5 follow-up).
+; Server side (bm25_rag.exe via RagSearch): maxlines=3 (exp 15), minscore=6.0
+; answer-presence floor (fs queries score higher per term; recalibrated).
+; No relevance gate (exp 12), no sidecar trim (server-side, exp T1 bug).
+; Two-phase: pass 1 inject + marker, think NOT closed; pass 2 accepts.
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  PrintBanner "HOOK: got closing think tag"
+  Make "stream" GetStream                        ; the stream up to the think-close
+  PrintBanner "STREAM Length"                    ; the injection point is reached
+  Print StreamLength :stream
+  Make "markerpos" Search "reviewed the reference facts" :stream   ; our own marker from pass 1
+  PrintBanner "MARKER POSITION (NIL = not found)"
+  Print :markerpos                               ; the marker's byte offset, or NIL
+  IfElse IsNumber :markerpos [
+    PrintBanner "PASS 2: marker present -> DO NOTHING, accept tag"
+  ] [
+    PrintBanner "PASS 1: marker absent -> retrieve with floor"   ; first pass: retrieve and inject
+    Make "fullthink" :stream                     ; the full think text, before trimming
+    Make "query" :fullthink
+    Make "dot" Search ". " :fullthink             ; the first sentence break in the think text
+    IfElse IsNumber :dot [                       ; a NUMBER means a period is there to trim at
+      Make "qlen" :dot + 1                       ; keep the period, drop everything after it
+      Make "query" Part :fullthink 0 :qlen       ; the first sentence, as the query
+      PrintBanner "QUERY TRIMMED TO FIRST SENTENCE"
+    ] [
+      PrintBanner "NO PERIOD - FULL THINK AS QUERY"
+    ]
+    Make "hits" RagSearch :query "maxlines=3;minscore=6.0;topmin=25;base=examples/research/bible/ragg_base.txt"   ; the answer-presence floor suppresses a miss
+    PrintBanner "RAG ANSWER (empty = below floor, suppressed)"
+    Print :hits                                   ; the bare reference lines, "" when the floor fired
+    IfElse (:hits = "") [
+      PrintBanner "SUPPRESSED by minscore floor -> DO NOTHING"
+    ] [
+      Make "newstream" :stream _ "\n" _ :hits _ "\n\nI have reviewed the reference facts above. Let me now finalize my answer plan."   ; the think block stays OPEN
+      PrintBanner "NEW STREAM (think NOT closed)"
+      Print :newstream                           ; the rewritten stream handed to SetStream
+      PrintBanner "CALLING SetStream"
+      SetStream :newstream                       ; KV rollback, re-encode and prefill of the new stream
+      PrintBanner "SetStream DONE - generation continues in think mode"
+    ]
+  ]
+] []

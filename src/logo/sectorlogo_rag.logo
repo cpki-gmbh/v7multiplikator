@@ -1,0 +1,43 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sectorlogo_rag.logo -- RAG thought-augmentation sidecar
+;
+; Fires exactly once, when the model emits the </think> closing token.
+; At that moment GetStream holds everything generated so far -- the
+; thought text (the <think> open tag lives in the prompt template per
+; Sec.151, so the stream carries think CONTENT only), but NOT the
+; closing tag yet (the hook runs before the candidate token is accepted).
+;
+;   1. Q = the raw thought text (the stream IS the think content).
+;   2. R = ragSearch(Q) -- delegates to the autoexec RagSearch wrapper
+;      (DefineRagFunctions) with empty opts (the tool's default corpus).
+;      One retrieval entry point, no parallel DefineCommand.
+;   3. New stream = old stream + LF + R + LF + "</think>" -- the
+;      retrieved knowledge lands INSIDE the think block, the block is
+;      closed, and SetStream triggers the rewrite engine (KV
+;      rollback, re-encode, prefill). The model continues from the
+;      augmented state and answers with the injected knowledge.
+
+; ragSearch query -> delegates to the autoexec RagSearch (empty opts =
+; default corpus). Thin alias: keeps the call sites short.
+Define "ragSearch" [:query] [
+  Output RagSearch :query ""
+]
+
+IfElse (:Piece = "</think>") [
+  Make "s" GetStream
+  Make "q" :S
+  Make "r" ragSearch :Q
+  IfElse (:R = "") [] [
+    Make "a" :S _ "\n" _ :R _ "\n</think>"
+    PrintBanner "RAG QUERY"
+    Print :Q
+    PrintBanner "RAG ANSWER"
+    Print :R
+    PrintBanner "SETTING STREAM"
+    Print :A
+    SetStream :A
+  ]
+] []

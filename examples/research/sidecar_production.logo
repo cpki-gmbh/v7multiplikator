@@ -1,0 +1,66 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_production.logo
+; RAG experiment 16 + tuning T1: UNIFIED PRODUCTION RAG SIDECAR.
+; Substrate: think-continue, neutral-delta marker (exp 11c).
+; Trim: keep everything before the 3rd newline of the RAG answer.
+; T1 fix: the original trim kept only 2 lines (off-by-one in the
+; rest-relative newline search). Now: nl1 = end of line1, nl2 = end of
+; line2 (searched in rest AFTER nl1), nl3 = end of line3; inject through nl3.
+
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  PrintBanner "HOOK: got closing think tag"
+  Make "stream" GetStream                        ; the stream up to the think-close
+  PrintBanner "STREAM Length"                    ; the injection point is reached
+  Print StreamLength :stream
+  Make "markerpos" Search "reviewed the reference facts" :stream   ; our own marker from pass 1
+  PrintBanner "MARKER POSITION (NIL = not found)"
+  Print :markerpos                               ; the marker's byte offset, or NIL
+  IfElse IsNumber :markerpos [
+    PrintBanner "PASS 2: marker present -> DO NOTHING, accept tag"
+  ] [
+    PrintBanner "PASS 1: marker absent -> retrieve and trim"   ; first pass: retrieve, trim, inject
+    Make "query" :stream                          ; the think text doubles as query expansion
+    Make "hits" RagSearch :query "base=examples/research/ragg_base.txt"   ; BM25 over the knowledge base
+    PrintBanner "RAW RAG ANSWER"
+    Print :hits                                   ; the untrimmed corpus answer
+    IfElse (:hits = "") [                       ; an empty answer is suppressed by the server floor
+      PrintBanner "RAG empty -> DO NOTHING this pass"
+    ] [
+      Make "trimmed" :hits                        ; the answer as it will be injected, trimmed below
+      Make "nl1" Search "\n" :hits                 ; end of the first answer line
+      IfElse IsNumber :nl1 [
+        Make "pos1" :nl1 + 1                      ; the first byte AFTER that newline
+        Make "rest2" Part :hits :pos1 99999        ; the tail that follows the first line
+        Make "nl2" Search "\n" :rest2             ; end of the second answer line, rest-relative
+        IfElse IsNumber :nl2 [
+          Make "pos2" :pos1 + :nl2 + 1            ; the third line's start, back in :hits coordinates
+          Make "rest3" Part :hits :pos2 99999      ; the tail that follows the second line
+          Make "nl3" Search "\n" :rest3           ; end of the third answer line
+          IfElse IsNumber :nl3 [
+            Make "len3" :pos2 + :nl3              ; absolute offset of the 3rd newline
+            Make "trimmed" Part :hits 0 :len3      ; the answer through the 3rd newline
+            PrintBanner "TRIMMED TO 3 LINES (through 3rd newline)"
+          ] [
+            PrintBanner "ONLY 3 LINES TOTAL - NO TRIM NEEDED"
+          ]
+        ] [
+          PrintBanner "ONLY 2 LINES - NO TRIM NEEDED"    ; fewer than three lines: nothing to cut
+        ]
+      ] [
+        PrintBanner "ONLY 1 LINE - NO TRIM NEEDED"
+      ]
+      PrintBanner "TRIMMED RAG (injected)"
+      Print :trimmed                               ; the trimmed answer that gets injected
+      Make "newstream" :stream _ "\n" _ :trimmed _ "\nI have reviewed the reference facts above. Let me now finalize my answer plan."   ; the think block stays OPEN
+      PrintBanner "NEW STREAM (think NOT closed)"
+      Print :newstream                            ; the rewritten stream handed to SetStream
+      PrintBanner "CALLING SetStream"
+      SetStream :newstream                        ; KV rollback, re-encode and prefill of the new stream
+      PrintBanner "SetStream DONE - generation continues in think mode"
+    ]
+  ]
+] []

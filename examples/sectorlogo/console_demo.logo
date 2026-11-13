@@ -1,0 +1,82 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ============================================================================
+; console_demo.logo -- SectorLogo ANSI console demo
+;;
+;; A tour of the stdlib console commands: colors (16-color palette and
+;; 24-bit truecolor), cursor positioning, screen erase, Character /
+;; Number, ReadKey polling, and the NearestMatch-powered nearest-palette
+;; helpers. Run it in a real console window (VT processing on) for the
+;; full effect; with output redirected to a file it still works -- VT is
+;; off, truecolor falls back to nearest palette codes, and the escape
+;; sequences land in the file as raw bytes.
+;;
+;; Run:  bin\run_sectorlogo.exe bin\v7_threading.dll ^
+;;       weights\databases\qwen3_0.6b\lz4ht.db examples\sectorlogo\console_demo.logo
+;; ============================================================================
+
+ClearScreen                                  ; start from a clean screen
+Print "console demo -- sectorlogo stdlib console commands"
+
+; ---- PrintBanner (gradient header) ----
+PrintBanner "Colors"                        ; the 16-color palette section
+PrintBanner "Cursor Positioning"             ; SetCursor / SetPaletteColor
+PrintBanner "Character and Number"           ; the Character and Number conversions
+PrintBanner "Nearest Palette Match"          ; the NearestMatch-powered helpers
+PrintBanner "Keyboard Poll"                  ; the non-blocking ReadKey poll
+
+; ---- palette (16 colors) ----
+PrintRaw "palette: "
+SetPaletteColor 10 Print " green "
+SetPaletteColor 12 Print " blue "                  ; palette index 12, light blue
+SetPaletteColor 14 Print " cyan "
+SetPaletteColor 13 Print " magenta "
+SetPaletteColor 15 Print " white "
+ResetColors                                       ; back to the terminal default
+Print "palette done (16 colors)"
+
+; ---- truecolor (or nearest-16 fallback when VT is off) ----
+SetColor 178 102 255 Print " violet-truecolor "
+SetColor 80 200 120   Print " mint-truecolor "      ; 24-bit RGB, or the nearest palette code when VT is off
+SetColor 70 130 180   Print " steel-blue-truecolor "
+SetBackground 40 40 60        Print " dark-slate-background "
+ResetColors                                       ; back to the terminal default
+Print "truecolor done (or nearest-16 fallback)"
+
+; ---- cursor positioning ----
+SetCursor 5 12                                   ; 1-based column and row
+SetPaletteColor 14
+Print "this line starts at column 5, row 12"
+ResetColors                                       ; back to the terminal default
+
+; ---- Character / Number ----
+Print "Character 66 -> "
+Print Character 66                               ; a character code to its character
+Print "Number  -> "
+Print Number "B"                                 ; a character back to its code
+Print "Number -> "
+Print Number Character 33
+
+; ---- nearest palette match (NearestMatch vector quantization) ----
+PrintRaw "NearestColor for (255,165,0) -> "
+Print NearestColor 255 165 0                     ; orange lands on the closest palette index
+PrintRaw "NearestColor for (230,230,230) -> "
+Print NearestColor 230 230 230                   ; near-white lands on the closest palette index
+
+; ---- keyboard (non-blocking poll -- NIL if nothing pressed) ----
+SetPaletteColor 14
+Print "press a key (or not -- ReadKey never waits)..."
+ResetColors
+Make "key" ReadKey                            ; the pressed key's code, or NIL
+IfElse IsNumber :key [                        ; a key was actually pressed
+  Make "char" Character :key                  ; its character
+  Print "got key!"
+  PrintRaw "Number confirms: "
+  Print Number :char                             ; the code that round-trips the character
+] [
+  Print "no key pending -- that is fine, ReadKey does not block"
+]
+
+Print "console demo complete"

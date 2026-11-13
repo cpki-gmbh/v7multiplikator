@@ -1,0 +1,116 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ============================================================================
+; bench_sectorlogo.logo -- SectorLogo64 interpreter benchmark, same 4
+; workloads and shapes as bench_fib.py / bench_fib.js:
+;   recursive fib(24), loopadd(20000), strbuild(2000), replace-all on
+;   "cat " repeated 60 times.
+; Timing via host GetTickCount64 through CallLibrary (low 32 bits -- valid
+; for differences within one run). Prints one millisecond sample per
+; repetition; the caller computes the median. Inner call counts differ per
+; workload so each sample stays above tick resolution.
+; ============================================================================
+
+; fib n -- naive recursive fibonacci; returns the n-th fibonacci number
+Define "fib" [:n] [                                  ; fib n -- naive recursive fibonacci; returns the n-th number
+  IfElse ( :n < 2 ) [                               ; base case: fib 0 = 0, fib 1 = 1
+    Output :n
+  ] [
+    Local "left"                                    ; left/right hold the two recursive results
+    Local "right"
+    Make "left" Fib ( :n - 1 )
+    Make "right" Fib ( :n - 2 )                     ; two calls per node -- this is the measured cost
+    Output ( :left + :right )
+  ]
+]
+
+; loopadd iterations -- accumulate 1..iterations into a total (two Makes per trip)
+Define "loopadd" [:iterations] [                    ; loopadd n -- sum of 1..n; two Makes per trip
+  Local "total"                                     ; the accumulator
+  Local "counter"
+  Make "total" 0
+  Make "counter" 1                                  ; the trip counter walks 1..iterations
+  Repeat :iterations [
+    Make "total" ( :total + :counter )
+    Make "counter" ( :counter + 1 )                 ; the increment store is part of the workload
+  ]
+  Output :total                                     ; expected 200010000 for n = 20000
+]
+
+; strbuild steps -- concatenate the letter y onto x, steps times
+Define "strbuild" [:steps] [                        ; strbuild n -- "x" followed by n copies of "y"
+  Local "grown"                                     ; the string under construction
+  Make "grown" "x"
+  Repeat :steps [
+    Make "grown" ( :grown _ "y" )                    ; `_` is infix concat -- its copy dominates the cost
+  ]
+  Output :grown                                     ; expected 2001 bytes for n = 2000
+]
+
+; replaceall text old new -- replace every occurrence of old in text with new
+Define "replaceall" [:text :old :new] [             ; replaceall text old new -- every occurrence of old becomes new
+  Local "pos"                                       ; match position of the next occurrence of old
+  Repeat [                                          ; endless: the loop ends when Search returns NIL
+    Make "pos" Search :old :text
+    IfElse IsNumber :pos [                          ; a NUMBER means old is still present in the haystack
+      Make "text" Replace :text :old :new            ; Replace rewrites only the first hit, so the loop drives it
+    ] [
+      Stop                                          ; old is exhausted -- leave the loop
+    ]
+  ]
+  Output :text                                      ; the fully rewritten haystack
+]
+
+; nowms -- host tick count in milliseconds (low 32 bits; differences valid)
+Define "nowms" [] [
+  Output CallLibrary ["kernel32.dll" "GetTickCount64" "integer" []]
+]
+
+; ---- correctness gates (same expected values as the python and js benches) ----
+Make "gate" Fib 24                                  ; expected 46368
+IfElse ( :gate != 46368 ) [ Print "gate failed: fib" Exit ] []
+Make "gate" Loopadd 20000
+IfElse ( :gate != 200010000 ) [ Print "gate failed: loop" Exit ] []
+Make "gate" Strbuild 2000                           ; a 2001-byte string, so the gate compares its length
+Make "glen" TextLength :gate
+IfElse ( :glen != 2001 ) [ Print "gate failed: strbuild" Exit ] []   ; length instead of comparing bytes
+Make "hay" ""
+Repeat 60 [ Make "hay" ( :hay _ "cat " ) ]
+Make "gate" Replaceall :hay "cat " "dog "           ; expected 240 bytes
+Make "glen" TextLength :gate
+IfElse ( :glen != 240 ) [ Print "gate failed: replace" Exit ] []
+Print "gates ok"                                    ; all four expected values matched
+
+; ---- timed samples: fib 24, one call per sample ----
+Repeat 5 [
+  Make "start_tick" Nowms                          ; the clock reading before the workload
+  Fib 24                                            ; one fib 24 call per sample
+  Make "end_tick" Nowms                            ; the clock reading after it
+  Print ( :end_tick - :start_tick )                 ; the millisecond sample for this repetition
+]
+
+; ---- timed samples: loopadd 20000, one hundred calls per sample ----
+Repeat 5 [
+  Make "start_tick" Nowms                          ; the clock reading before the workload
+  Repeat 100 [ Loopadd 20000 ]                      ; one hundred calls per sample
+  Make "end_tick" Nowms                            ; the clock reading after it
+  Print ( :end_tick - :start_tick )                 ; the millisecond sample for this repetition
+]
+
+; ---- timed samples: strbuild 2000, five calls per sample ----
+Repeat 5 [
+  Make "start_tick" Nowms                          ; the clock reading before the workload
+  Repeat 5 [ Strbuild 2000 ]                        ; five calls per sample
+  Make "end_tick" Nowms                            ; the clock reading after it
+  Print ( :end_tick - :start_tick )                 ; the millisecond sample for this repetition
+]
+
+; ---- timed samples: replaceall 60-word hay, one thousand calls per sample ----
+Repeat 5 [
+  Make "start_tick" Nowms                          ; the clock reading before the workload
+  Repeat 1000 [ Replaceall :hay "cat " "dog " ]      ; one thousand calls per sample
+  Make "end_tick" Nowms                            ; the clock reading after it
+  Print ( :end_tick - :start_tick )                 ; the millisecond sample for this repetition
+]

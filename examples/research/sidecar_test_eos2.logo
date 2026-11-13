@@ -1,0 +1,10 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_test_eos2.logo
+; Print EndToken value directly at first hook call.
+PrintBanner "EndToken value"
+Print EndToken                                    ; the end-of-text token id the engine compares against
+PrintBanner "first TOK value"
+Print :TokenNumber                               ; the token id of this, the first, hook call

@@ -1,0 +1,19 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_test_eos.logo
+; Verification for EndToken primitive: print the model's eos token id,
+; then watch :TokenNumber each call and Print A MARKER when it equals it.
+; Stream untouched - pure detection test. Run with HIGH -n so the
+; model reaches EOS naturally (low -n cuts generation and EOS never
+; fires - the max_gen exit path does not call the hook).
+
+IfElse (:TokenNumber = EndToken) [             ; the generated token IS the end-of-text token
+  PrintBanner "EOS DETECTED: TOK == eos_token_id"
+  Print :TokenNumber                              ; the end-of-text token id itself
+] [
+  IfElse (:PIECE = "</think>") [
+    PrintBanner "think closed (normal RAG point)"
+  ] []
+]

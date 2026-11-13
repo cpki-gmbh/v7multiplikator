@@ -1,0 +1,26 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ============================================================================
+; bench_cpp\strbuild.logo -- the string-concatenation workload, for the
+; SectorLogo C++ port. See fib.logo for why these four files exist; the result
+; is 2001 bytes ("x" plus 2000 "y"s), checked in bench_sectorlogo.logo's gate
+; block.
+;
+; This is the workload where the two ports are most worth separating, because
+; the answer is a STRING on a cons-free buffer and the cost is dominated by the
+; copy that each `_` does. `_` is the infix concat operator, and the parentheses
+; around the two operands are what make the infix spelling legal.
+; ============================================================================
+
+Define "strbuild" [:steps] [                        ; strbuild n -- "x" followed by n copies of "y"
+  Local "grown"                                     ; the string under construction
+  Make "grown" "x"
+  Repeat :steps [
+    Make "grown" ( :grown _ "y" )                    ; `_` is infix concat -- its copy dominates the cost
+  ]
+  Output :grown
+]
+
+Strbuild 2000                                       ; the benchmark sample: expected 2001 bytes

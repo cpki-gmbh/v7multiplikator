@@ -1,0 +1,31 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; test_def_exe_fn.logo -- test DefineCommand with echo_args.exe
+;
+; Usage: bin\run_sectorlogo.exe <dll> <db> src\logo\test_def_exe_fn.logo
+;
+; Tests: string arg, number arg, multiple args, format %s/%d
+; NOTE (Sec.146.29): bare atoms in argument position are EVALUATED -- a
+; literal whose text collides with a builtin name (first, second, print, ...)
+; invokes that builtin instead of passing as a value. Use collision-free
+; literals like alpha/beta in test scripts.
+
+DefineCommand "echo" [:msg] "bin\\echo_args.exe" "%s"
+
+Print "=== Test 1: single string arg ==="
+Make "r" echo "hello world"
+Print :r
+
+Print "=== Test 2: number arg ==="
+DefineCommand "echoNum" [:n] "bin\\echo_args.exe" "%d"
+Make "r2" echoNum 42
+Print :r2
+
+Print "=== Test 3: multiple args ==="
+DefineCommand "echoTwo" [:a :b] "bin\\echo_args.exe" "%s %s"
+Make "r3" echoTwo "alpha" "beta"
+Print :r3
+
+Print "=== All tests done ==="

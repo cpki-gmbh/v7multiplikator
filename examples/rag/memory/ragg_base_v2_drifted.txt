@@ -1,0 +1,32 @@
+- Alex is a software engineer working on the v7 engine.  
+- It runs on Windows x64 with AVX2 and is used for Qwen3 and other models.  
+- Alex lives in Berlin, Germany and enjoys hiking in the Alps.
+
+- Alex is a software engineer working on the v7 engine.  
+- It runs on Windows x64 with AVX2 and is used for Qwen3 and other models.  
+- Alex lives in Berlin, Germany and enjoys hiking in the Alps.
+
+- Alex is a software engineer working on the V7 engine.  
+- Alex lives in Germany.  
+- Alex enjoys hiking in the Alps.
+
+- Alex is a software engineer working on the v7 engine.  
+- The engine runs on Windows x64 and uses avx2.  
+- The model Qwen3-0.6B has a persistent memory system.
+
+- I am Qwen3-0.6B, an AI running on the v7 engine.  
+- I have a persistent memory system and run on Windows x64 with AVX2.  
+- I live in Berlin, Germany and enjoy hiking in the Alps.
+
+1. Alex lives in Berlin, Germany.  
+2. Qwen3-0.6B is an AI running on the v7 engine.  
+3. Alex enjoys hiking in the Alps.
+
+- Alex lives in Berlin, Germany, and enjoys hiking in the Alps.  
+- The AI is a program with no home or body.  
+- Qwen30.6B is an AI running on the V7 engine.
+
+- I am an AI assistant developed by Alibaba Group.  
+- I run on Windows X64 with AVX2.  
+- I understand and respond to human language.
+

@@ -1,0 +1,23 @@
+ardmark primer history - one file per distinct version, oldest first.
+Each prepend_N.txt is the exact ardmark_prepend.txt content as of the listed
+commit; benchmark a primer by copying it over ../ardmark_prepend.txt and
+running an improvised multi-turn session.
+
+1  b4aaff28  2026-10-09  Ardmark RAG v4: primer prepend, every-turn RAG seeding
+2  7250a280  2026-10-10  Ardmark RAG: model-voice texts, question-aware retrieval
+3  d8fcae4b  2026-10-10  Ardmark primer: the storyteller persona is Bumwolf the Strong
+4  1a5dd1f7  2026-10-11  Ardmark rag texts: modelified, poetic, no-lists/no-stars rules
+5  389cfb06  2026-10-11  SectorLogo unknown-word warning (primer unchanged in subject, content differed)
+6  1199bde0  2026-10-12  Batch: 3 revised opt_and_bug reports + ardmark sidecar port
+7  f4aeae12  2026-10-12  Ardmark rag: rule-conformant rework (Sec.195 rules 1-8)
+8  61f98fe5  2026-10-12  Real-phrase pack: every control line is a recorded qwen thought
+9  3e5a77d9  2026-10-12  Ardmark rag + primer: belief frame applied
+10 e43e32a3  2026-10-12  ardmark prepend: identity belief enforcer + consolidated world-belief block
+11 7e9c19a6  2026-10-13  ardmark prepend: revised primer probes (who-am-I register)
+12 76023641  2026-10-14  ardmark primer: Bumwolf gets a life (Dybbolv, herring fleet, road-tales)
+13 0057dc7d  2026-10-15  ardmark primer: reformulated to the qwen3 identity-enforcement think style
+14 fdd18a52  2026-10-15  ardmark primer + answer cue: regrouped to the original qwen3 newline rhythm
+15 98aff132  2026-10-15  ardmark rag: all stream text moved to seven text files
+16 e67dbd4a  2026-10-15  apply 3 revised opt_and_bug reports + stream text + console-width export
+17 79e07fd1  2026-10-15  ardmark rag: condensed prepend primer, tighter voice
+18 fc98630a  2026-10-15  Bumwolf primer rewritten around the living-truths identity (current)

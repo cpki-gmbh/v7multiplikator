@@ -1,0 +1,52 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_rag_negate.logo
+; RAG experiment: negation-only injection
+; When the end-think token is detected, query bm25_rag, then INJECT only
+; negation sentences from the retrieved passages. The model must
+; reconcile the negation with its prior beliefs without being told
+; what to believe positively.
+;
+; Strategy: For each line in the RAG answer, if it contains "not ",
+; "cannot ", "never ", "no ", or "don't ", include it. Otherwise skip.
+; This tests whether NEGATION ALONE (without positive claims) can
+; override the model's prior.
+
+; containsnegation line -- 1 if line carries any negation marker ("not ", "cannot ", "never ",
+; "don't ", "no "), else 0. Used to filter RAG passages down to negation-only sentences.
+Define "containsnegation" [:line] [
+  IfElse IsNumber Search "not " :line [Output 1] []
+  IfElse IsNumber Search "cannot " :line [Output 1] []
+  IfElse IsNumber Search "never " :line [Output 1] []
+  IfElse IsNumber Search "don't " :line [Output 1] []
+  IfElse IsNumber Search "no " :line [Output 1] []
+  Output 0
+]
+
+; ragSearch query -> bm25_rag.exe search results (the autoexec RagSearch
+; with empty opts = the tool's default corpus). One wrapper, no parallel.
+Define "ragSearch" [:query] [
+  Output RagSearch :query ""
+]
+
+IfElse (:Piece = "_mEOL_") [
+  Make "s" GetStream
+  Make "q" :S
+  Make "r" ragSearch :Q
+  IfElse (:R = "") [] [
+    Make "n" ""
+    IfElse IsNumber Search "not " :R [
+      Make "n" :N _ :R
+    ] []
+    IfElse (:N = "") [] [
+      Make "a" :S _ "\n" _ "IMPORTANT: " _ :N _ "\n_mEOL_"
+      PrintBanner "NEGATE QUERY"
+      Print :Q
+      PrintBanner "NEGATE ANSWER"
+      Print :N
+      SetStream :A
+    ]
+  ]
+] []

@@ -1,0 +1,12 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_detect.logo
+; Step 1: Just detect the end-think token and print when found.
+
+Print :Piece
+
+IfElse (:Piece = "oai_end_think") [
+  Print ">>> end-think detected <<<"
+] []

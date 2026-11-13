@@ -1,0 +1,195 @@
+LIBRARY v7_threading
+EXPORTS
+; Export list; host API: src/v7_lib.h and docs/native_api.md.
+    v7d_q8
+    v7d_f32
+    v7s_shutdown
+    v7s_get_num_workers
+    get_config_was_fixed
+    v7s_set_spin
+
+    ; Experimental: standalone four-token Q8 batch kernel,
+    ; not part of the public v7_lib.h ABI; validator/testing use only
+    v7s_q8_batch4
+    v7d_q8_batch4
+
+    v7s_sectorlogo_eval_script
+
+    v7d_attention
+    v7d_attention_prefill
+    v7d_fused_f32
+    v7d_swiglu
+    v7d_swiglu_q8
+    v7s_set_fused_rope
+    v7s_rope_init
+    v7s_fused_add_rmsnorm
+    v7s_rmsnorm
+    v7s_add_inplace
+    v7d_memcpy
+    v7d_quantize
+    v7s_rmsnorm_rope_heads
+    v7s_rmsnorm_quantize
+    v7s_sample
+
+    ; Chat loop (internal; public tier lives in the public v7_* block below)
+    ; v7s_chat
+
+    ; Current-turn user prompt access (RAG query augmentation, sidecars)
+    v7s_get_user_prompt
+
+    ; Runtime thinking-template selector (chat_template_usage_analysis.md)
+    v7s_enable_thinking
+
+    ; Vision (VLM): image embedding upload (internal entry points; public v7_chat_image / v7_generate_image below)
+    v7s_set_vision_embeddings
+    v7s_vit_encode_callback
+    v7s_vit_forward
+
+    ; Dispatched ViT linear matmul (vit_speedup.md P0 benchmark + test entry)
+    v7d_vit_linear
+
+    ; Bicubic resize (LLaVA-OneVision preproc; PIL BICUBIC resample=3 reference)
+    v7s_bicubic_resize
+
+    ; ViT dispatch tuning BSS globals (live-write targets for tune_vit_dispatch.exe)
+    vit_max_chunks
+    vit_min_chunk_cols
+
+    ; Fused QKV bias pointer (live-write target for v_fused_validate.exe).
+    ; Production publishes this before every v7d_fused_f32 dispatch; the validator
+    ; must publish it too, because the kernel has no NULL-bias special case
+    ; (Sec.0a: no tool-only special form in the dispatcher or kernel).
+    fused_bias_ptr
+
+    ; M-RoPE (multimodal rotary position embeddings)
+    v7s_mrope_prepare
+    v7s_mrope_restore
+
+    ; Generate loop (internal; single-turn via v7s_chat's turn-1 template -- public: v7_generate)
+    ; v7s_generate
+
+    ; File-backed allocator (fbm_alloc/fbm_free): PRIVATE fallback tier of
+    ; mdb_alloc_mem (microdb_mem.inc) -- linker-visible, NOT a DLL export.
+
+    ; Database init (internal label stays; public tier: v7_init -- case-insensitive collision)
+    ; V7_init
+
+    ; Inference init (internal labels stay; public tier: v7_initialize_inference / v7_free_inference)
+    ; v7s_inference_create
+    ; v7s_inference_destroy
+
+    ; ========================================================================
+    ; PUBLIC v7_* C API TIER (public_api.inc -- the "normal program" surface;
+    ; context hidden in BSS per move_inference_context_to_bss_plan.md)
+    ; ========================================================================
+    v7_init
+    v7_db_load
+    v7_db_save
+    v7_initialize_inference
+    v7_free_inference
+    v7_chat
+    v7_generate
+    v7_chat_image
+    v7_generate_image
+    v7_set_sampler_temperature
+    v7_set_sampler_topp
+    v7_set_sampler_presence_penalty
+    v7_set_sampler_topk
+    v7_set_sampler_seed
+    v7_set_quantize
+    v7_set_max_gen
+    v7_get_quantize
+    v7_engine_is_dead
+    v7_get_death_reason
+    v7_get_version
+    save_kv_cache
+    load_kv_cache
+    v7_set_streaming
+    v7_get_position
+    v7_set_position
+    v7_get_think_mode_active
+    v7_get_gen_count
+    v7_get_console_width
+    v7_get_token_probs
+    v7_set_worker_priority
+    v7_enable_thinking
+    v7_db_add
+    v7_db_find
+    v7_encode
+    v7_get_generation_statistic
+    v7_get_best_fitness
+    v7_get_pool_fitness
+    v7_get_active_shape_count
+    v7_shutdown
+    v7_get_internal_inference_ctx
+
+    ; SectorLogo64 interpreter (Logo-dialect sidecar hook)
+    v7s_sectorlogo_on_token
+    v7s_sectorlogo_interp
+    v7s_set_caller_hmodule
+    ; Execute child process and capture stdout
+    v7_execute
+    ; Script-reachable fatal: print a message, then die through the standard FATAL path
+    v7_do_fatal
+     ; --- internal / tuning exports (used by dev-side validators, the tuner
+     ; and the autotuner; NOT part of the documented public API). vit_max_chunks,
+     ; vit_min_chunk_cols, fused_bias_ptr and fbm_alloc/fbm_free are declared in
+     ; their own groups above; g_ht/shape_blocks/debug_param_set_0 in the
+     ; MicroDB group below. ---
+    matrix_multiplication
+    matrix_multiplication_mode
+    init_prefetch_backup
+    set_prefetch_distance
+    set_prefetch_type
+    v7_execute_fmt
+
+     ; [exec] spawn tracing gate (1 = print every spawned command line)
+
+    ; File I/O (shared 64KB buffer)
+    v7s_readfile
+    v7s_writefile
+
+    ; Generation statistics access
+    v7s_get_generation_statistic
+
+    ; Tokenizer encode
+    encode
+
+    ; Token stream diagnostic dump
+    dump_token_stream
+    enable_token_dump
+
+    ; CPUID hardware-baseline decision (written once by DllMain; tools write it to
+    ; exercise the gate -- see test_engine_death.c)
+    cpu_features_ok
+
+    ; InferenceContext diagnostic dump
+    enable_dump
+
+    ; Forward pass (FP32 + Q8 + fused Q8 -- both dispatch through ASM)
+    forward_f32
+    forward_q8
+    prefill_forward_f32
+    prefill_forward_q8
+    v7d_q8_fused
+
+    ; MicroDB persistent hash table exports
+    g_ht
+     shape_blocks
+     debug_param_set_0
+; REMOVED: taper_shift / quantize_chunk_groups data exports (now in param_set slots per ?112)
+     g_probe_sex_percent
+     g_probe_mutations_max
+     config_set_random_probe
+     config_mutate_genome
+     ht_init
+    ht_destroy
+    ht_add
+    ht_find
+    db_save
+    db_load
+    mdb_compress
+    mdb_decompress
+    db_set_readonly
+    ; Bounded sprintf (float32, %d, %s, %c, %f, %%)
+    v7sprintf

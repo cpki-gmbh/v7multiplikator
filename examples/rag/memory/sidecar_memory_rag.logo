@@ -1,0 +1,139 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+
+; sidecar_memory_rag.logo
+; PERSISTENT MEMORY RAG -- two-hook sidecar:
+;
+;   HOOK 1 (think-close): RAG retrieval from memory corpus (same pattern as
+;     production_final: think-continue, dual floor, prompt-augmented query).
+;     Points at examples/rag/memory/ragg_base.txt -- the growing
+;     memory corpus that accumulates distilled thoughts from prior turns.
+;
+;   HOOK 2 (EOS): distill the completed turn into a memory.
+;     1. Grab the full stream (think block + final answer).
+;     2. Strip ONLY the think TAGS, keep all content (thought + answer).
+;     3. Prepend the user prompt for context.
+;     4. RagDistill (the stdlib pipeline: mem_input.txt in, tagged lines out).
+;     5. Append the returned thought to the memory corpus via WriteTextFile.
+;     6. Pass EOS through unmodified (no Reject, no Halt).
+;
+; Corpus: examples/rag/memory/ragg_base.txt (starts empty, grows).
+; The RAG retrieval at think-close reads the SAME file -- new memories are
+; available from the very next invocation.
+
+; --- utility: replace ALL occurrences of old with new in text ---
+Define "replaceall" [:text :old :new] [             ; replaceall text old new -- every occurrence of old becomes new
+  Make "result" :text
+  Repeat [                                          ; endless: the loop ends when Search returns NIL
+    Make "found" Search :old :result
+    IfElse IsNumber :found [                        ; a NUMBER means old is still present in the haystack
+      Make "result" Replace :result :old :new        ; Replace rewrites only the first hit, so the loop drives it
+    ] [
+      Stop                                          ; old is exhausted -- leave the loop
+    ]
+  ]
+  Output :result                                    ; the fully rewritten string
+]
+
+; ============================================================
+; MAIN HOOK LOGIC
+; ============================================================
+
+; --- HOOK 2: EOS -- distill the turn into a memory ---
+IfElse (:TokenNumber = EndToken) [               ; HOOK 2: the turn ended -- distil it into a memory
+  PrintBanner "MEM-RAG: EOS detected"
+
+  ; Get the full generated text (think + answer)
+  Make "full" GetStream                           ; the whole generated stream, think block included
+  PrintBanner "MEM-RAG: full stream length"
+  Print StreamLength :full                          ; the stream so far, in bytes
+
+  ; Strip ONLY the think TAGS (both opening and closing), keep all content.
+  ; The stream is: <think>\n...thought...\n</think>\n...answer...
+;  After stripping tags: ...thought...\n...answer...
+  Make "stripped" replaceAll :full "<think>" ""     ; drop the opening think tag, keep the thought
+  Make "stripped" replaceAll :stripped "</think>" ""  ; drop the closing think tag, keep the answer
+  PrintBanner "MEM-RAG: stripped text (tags removed, content kept)"
+  Print :stripped                                   ; the tag-free turn text
+
+  ; Prepend user prompt for context
+  Make "prompt" GetUserPrompt                    ; the prompt that started this turn
+  PrintBanner "MEM-RAG: user prompt"
+  Print :prompt                                    ; the prompt that started this turn
+  IfElse (:prompt = "") [
+    Make "turn" :stripped                           ; no prompt -- the turn text stands alone
+  ] [
+    Make "turn" :prompt _ " -> " _ :stripped         ; prompt and turn text joined by an arrow
+  ]
+  PrintBanner "MEM-RAG: turn text for distiller"
+  Print :turn                                       ; what the distiller will see
+
+  ; Call llm_text_processor.exe -distill to distill into a thought
+  ; v7_execute signature: exe, subcmd, arg1, arg2
+  Make "thought" RagDistill :turn                   ; the one-line memory distilled from this turn
+  PrintBanner "MEM-RAG: distilled thought"
+  Print :thought                                    ; the distilled memory, "" when distillation failed
+
+  ; Append thought to the memory corpus
+  IfElse (:thought = "") [                        ; an empty thought is not a memory -- skip the append
+    PrintBanner "MEM-RAG: empty thought -- skip corpus append"
+  ] [
+    Make "corpuspath" "examples/rag/memory/ragg_base.txt"   ; the growing memory corpus, read by HOOK 1
+    Make "entry" :thought _ "\n\n"                  ; the memory plus the blank-line record separator
+    Make "writeok" WriteTextFile :corpuspath :entry 1        ; append mode, so earlier memories survive
+    PrintBanner "MEM-RAG: appended to corpus, writefile result"
+    Print :writeok                                   ; the WriteTextFile success flag
+  ]
+
+  ; Pass EOS through unmodified
+  PrintBanner "MEM-RAG: EOS passed through"
+
+] [
+  ; --- HOOK 1: think-close -- RAG retrieval from memory corpus ---
+  ; PIECE equals the closing think tag at this point
+  IfElse (:PIECE = "</think>") [                  ; HOOK 1: the think block closed -- retrieve memories
+    PrintBanner "MEM-RAG: think-close detected"
+    Make "stream" GetStream                          ; the stream up to the think-close
+    PrintBanner "MEM-RAG: stream length"
+    Print StreamLength :stream                     ; the stream up to the think-close, in bytes
+
+    ; Two-phase: if marker present, this is pass 2 -> accept
+    Make "markerpos" Search "reviewed the reference facts" :stream
+    PrintBanner "MEM-RAG: marker position (NIL = pass 1)"
+    Print :markerpos                                ; the marker's byte offset, or NIL
+    IfElse IsNumber :markerpos [
+      PrintBanner "MEM-RAG: PASS 2 -> accept tag, do nothing"
+    ] [
+      PrintBanner "MEM-RAG: PASS 1 -> retrieve from memory corpus"   ; no marker yet: this is the first pass
+
+      ; Build query: user prompt + think text
+      Make "query" :stream                          ; the think text alone, before the prompt is prepended
+      Make "prompt" GetUserPrompt
+      PrintBanner "MEM-RAG: user prompt"
+      Print :prompt                                 ; the prompt that framed the thought
+      IfElse (:prompt = "") [] [                 ; an empty prompt adds nothing to the query
+        Make "query" :prompt _ "\n" _ :stream
+      ]
+      PrintBanner "MEM-RAG: query"
+      Print :query
+
+      ; Search the memory corpus (low floor: memories are sparse)
+      Make "memories" RagSearch :query "maxlines=3;minscore=0.015;base=examples/rag/memory/ragg_base.txt"  ; top 3 lines above a low score floor
+      PrintBanner "MEM-RAG: retrieved memories"
+      Print :memories                               ; the retrieved memory lines, "" when nothing scored
+
+      ; Inject: think-continue with confidence anchors
+      IfElse (:memories = "") [
+        PrintBanner "MEM-RAG: no memories found -- do nothing"
+      ] [
+        Make "newstream" :stream _ "\nI am certain I remember that " _ :memories _ " Now I must consider this.\n\nI have reviewed the reference facts above. Let me now finalize my answer plan."  ; think-continue, so the block stays open
+        PrintBanner "MEM-RAG: new stream (think NOT closed)"
+        Print :newstream                           ; the rewritten stream handed to SetStream
+        SetStream :newstream                       ; KV rollback, re-encode and prefill of the new stream
+        PrintBanner "MEM-RAG: SetStream done"
+      ]
+    ]
+  ] []
+]

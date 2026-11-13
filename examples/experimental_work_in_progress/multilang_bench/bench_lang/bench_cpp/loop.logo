@@ -1,0 +1,28 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ============================================================================
+; bench_cpp\loop.logo -- the loop-accumulate workload, for the SectorLogo C++
+; port. See fib.logo for why these four files exist and what the `iters`
+; argument is for; the expected value is 200010000, checked in
+; bench_sectorlogo.logo's gate block.
+;
+; Two Makes per trip, as in the reference: the workload is the loop and the
+; variable store, not the addition, and dropping one of the two Makes would
+; measure a different language.
+; ============================================================================
+
+Define "loopadd" [:iterations] [                    ; loopadd n -- sum of 1..n; two Makes per trip
+  Local "total"                                     ; the accumulator
+  Local "counter"
+  Make "total" 0
+  Make "counter" 1                                  ; the trip counter walks 1..iterations
+  Repeat :iterations [
+    Make "total" ( :total + :counter )
+    Make "counter" ( :counter + 1 )                 ; the increment store is part of the workload
+  ]
+  Output :total
+]
+
+Loopadd 20000                                       ; the benchmark sample: expected 200010000

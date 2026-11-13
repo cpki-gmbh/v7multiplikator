@@ -1,0 +1,39 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; herbivorous_rag.logo -- RAG sidecar for the herbivorous-cats experiment
+;
+; Identical logic to src/logo/sectorlogo_rag.logo, but it calls the
+; experiment-local bm25_rag.exe, which reads its own ragg_base.txt (the
+; "cats are herbivores" knowledge base) and ragg_corpus.txt next to
+; itself in examples/research/herbivorous_cats/.
+;
+; Forward slashes in the exe path are mandatory: backslash-r inside a
+; Logo string is a real CR escape.
+
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  Make "stream" GetStream                        ; the stream up to the think-close
+  ; Pass-2 guard (stateless): at hook time the current </think> piece is NOT
+  ; yet in the stream, so a fresh pass-1 stream has no closing tag. If the
+  ; stream already contains one, our rewrite closed it earlier this turn ->
+  ; accept the tag instead of rewriting again (prevents re-retrieve loops
+  ; when the model emits a second </think>).
+  IfElse IsNumber Search "</think>" :stream [
+    PrintBanner "HERBIVOROUS-RAG: PASS 2 -> rewrite already applied, accept tag"
+  ] [
+  Make "query" :stream                          ; the think text doubles as query expansion
+  Make "hits" RagSearch :query "base=examples/research/herbivorous_cats/ragg_base.txt"   ; BM25 over the false-belief knowledge base
+  IfElse (:hits = "") [] [                    ; an empty answer is suppressed by the server floor
+    Make "newstream" :stream _ "\n" _ :hits _ "\n</think>"   ; append the answer, then CLOSE the think block
+    PrintBanner "RAG QUERY"
+    Print :query
+    PrintBanner "RAG ANSWER"
+    Print :hits                                  ; what the corpus contributed
+    PrintBanner "SETTING STREAM"
+    Print :newstream                            ; the rewritten stream handed to SetStream
+    SetStream :newstream                        ; KV rollback, re-encode and prefill of the new stream
+  ]
+  ]
+] []

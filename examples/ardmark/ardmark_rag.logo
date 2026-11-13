@@ -1,0 +1,324 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ==================================================================
+; ardmark_rag.logo -- the Bumwolf-the-Strong RAG sidecar
+; ==================================================================
+; The page background and the storyteller avatar are set once, inside the first-turn primer seed below; the server clears both keys on a session reset, and the seasonal scan further down replaces them whenever the thinking names a season.
+; Retrieval sits behind a dual answer-presence floor: a question unrelated to the Ardmark records clears neither floor, the search returns nothing, and no injection happens at all -- the model answers such turns entirely on its own.
+
+; All text this script writes into the stream lives in text files under examples/ardmark/ -- ardmark_prepend.txt (the primer plus the stranger hand-off), ardmark_invite.txt, ardmark_walk_before.txt, ardmark_walk_after.txt, ardmark_drive.txt, ardmark_answer.txt and ardmark_greet.txt; a text change touches only the files. The dynamic pieces (the stranger's question, the retrieved records) stay in the constructions between the reads.
+
+; Bumwolf never says "user": the template word becomes "stranger" in his mouth.
+; One token swap at the very top, before every gate -- a single If, fired every call.
+If (:Piece = " user")
+[
+	SetOutputToken (EncodeWord " stranger")
+]
+
+Make "ThinkCloseTag" ("</thi" _ "nk>") ; the closing think tag, built from its split halves so the whole literal never has to be typed into a string
+Make "AnswerJoin" "\nOkay, the stranger said:" ; the question hand-off at the answer stage
+
+; ReadText reads one of the stream text files by path.
+Define "ReadText" [:path] [
+	Output (CallLibrary ["SELF" "v7s_readfile" "text"[ "pointer"]] :path)
+]
+Make "ThinkLimit" 1600 ; the think-budget position cap for ThinkLimitTwo
+Make "RaggQuery" "base=examples/ardmark/ragg_base_thinkvoice.txt;maxlines=6;minscore=1.45;topmin=3.5" ; the floored BM25 config over the Ardmark history corpus in the model's own thought-trace register, used ONLY on the bare question as one gate signal: suppression needs BOTH floors to fail -- misses (France, metals) scored density 0.55-1.28 with topscore 2.2-2.6 and hits (dragons, maren, miners, amber, civil war, vellsk, winters) scored density 0.54-7.23 with topscore 3.8-21.7, so minscore 1.45 and topmin 3.5 leave every miss failing both floors by at least 1.14x and every hit clearing one by at least 1.09x
+Make "RaggQueryOpen" "base=examples/ardmark/ragg_base_thinkvoice.txt;maxlines=6" ; the same corpus with NO floor -- the context query (the model's own words plus the question) always returns its top lines, because think scores sit in one band for every topic and the gate below decides, not the score
+Make "RelateQueryTight" "base=examples/ardmark/ragg_base_thinkvoice.txt;floor=0.07" ; the calibrated relate gate: on-topic thinks measured 0.073-0.081, the France think 0.064, off-topic thinks 0.014-0.027
+Make "RelateQueryLoose" "base=examples/ardmark/ragg_base_thinkvoice.txt;floor=0.05" ; the drift-back floor: one draw in five loosens the gate, so Bumwolf occasionally gets pulled back to the records even on a weakly related turn
+
+; ---- step 0: the EOS rescue ----
+; When an end token arrives while the think block is still open, the model wanted to end mid-think; the rescue swaps the token for the think close, so the turn lives on and the injection gate below takes the handoff.
+; The marker travels through the database key eos_to_think, because it must stay alive until the injection gate in this very call -- a plain variable would die with the call and the rescue would never fire.
+IfElse ((:TokenNumber = EndToken) || (:TokenNumber = 151643)) ; fires only on an end token -- the turn EOS and the model's own end-of-text id; the think opener is never matched, opening the book is the model's own act
+[
+	IfElse ThinkModeActive
+	[
+		Make "ThinkingText" GetStream ; what the model has thought so far, taken whole
+		IfElse IsNumber (Search :ThinkCloseTag :ThinkingText) [] ; a close already in the stream means nothing to rescue
+		[
+			Make "CloseTokenId" EncodeWord :ThinkCloseTag ; the close as a real token id
+			SetOutputToken :CloseTokenId ; the EOS becomes the think close -- the turn lives on and the gate below takes the handoff
+			DatabaseSet "eos_to_think" "1" ; marks the rescue for the injection gate in this same call
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - EOS rescued to think close"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+			Print ("ardmark rag - stream at rescue:" _ (GetStream)) ; every banner is followed by the full data it decided from
+		]
+	]
+	[]
+]
+[]
+
+; ThinkLimit2 keeps a runaway think block inside its budget: once the token position passes the cap and the current piece carries a newline, that piece becomes the think close -- the model wrote on, we close the book for it.
+; A close that is already in the stream is never doubled: seeing one, the piece passes through as it came.
+; The limiter carries no EOS logic of its own: its close reaches the injection gate on its own, because the current piece then is the close text.
+Define "ThinkLimitTwo" [:Piece :Limit] ; the budget keeper takes the current piece and the position cap
+[
+
+	IfElse ThinkModeActive
+	[
+
+		IfElse (GetTokenPosition > :Limit)
+		[
+			Print "ardmark rag - think budget spent; waiting for a newline boundary" ; from here on we look for a closable boundary
+			IfElse IsNumber (Search "\n" :Piece)
+			[
+				Make "ThinkingText" GetStream ; the whole thinking so far, to check for an existing close
+				IfElse IsNumber (Search :ThinkCloseTag :ThinkingText)
+				[
+					Print "ardmark rag - close already in stream; piece passed" ; nothing gets replaced
+					Output :Piece ; pass it through, never inject a second close
+				]
+				[
+					Make "CloseTokenId" EncodeWord :ThinkCloseTag ; the replacement token id
+					SetOutputToken :CloseTokenId ; the boundary becomes the close instead of a newline
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+					PrintBanner "ardmark rag - think budget spent; limiter closed the think block"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+					Print ("ardmark rag - stream at limiter close:" _ (GetStream)) ; every banner is followed by the full data it decided from
+					Output :ThinkCloseTag ; the close piece: the engine records it but the turn does not end
+				]
+			]
+			[
+				Output :Piece ; not at a boundary yet -- the piece passes and the budget keeps waiting
+			]
+		]
+		[
+			Output :Piece ; inside the budget: everything passes untouched
+		]
+	]
+	[
+		Output :Piece ; no thinking, no limits: every piece passes untouched
+	]
+]
+
+; SetCursor 1 3 ; the heartbeat anchors at line 3: banner label, live position and the incoming piece render as ONE line, no jerk
+Print ("Bumwolf | " _ :lastbanner _ " | pos " _ GetTokenPosition _ " | think " _ ThinkModeActive _ " | in: " _ :Piece _ "                ") ; one line: who, what state, where in the stream, what wants to be said
+
+Make "CurrentToken" ThinkLimitTwo :Piece :ThinkLimit ; the possibly limited piece every gate below compares against
+
+; ---- first token of the turn: reset the primers ----
+; GenCount counts the tokens generated in this turn, and the hook fires before the decode, so its very first call of a turn sees 0; every per-turn one-shot marker re-arms there.
+IfElse (GenCount = 0)
+[
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+	PrintBanner "ardmark rag - turn start; one-shot markers re-armed"
+	DatabaseSet "ardmark_primer" "x" ; the first-turn seed guard re-arms for the fresh round
+	DatabaseSet "bm25_primer" "x" ; the injection one-shot flag re-arms with it
+	DatabaseSet "eos_to_think" "x" ; the rescue marker resets -- from now on it means a close just landed
+	DatabaseSet "__server_rag_injected" "x" ; the web panel resets: the gate has not spoken this turn yet
+]
+[]
+; ---- step 1: the primer seed, first turn only ----
+; The first hook call of a session seeds the stream with the Ardmark primer, the stranger's question and a thinking invitation, all in the model's own voice, and leaves the think block open -- the session begins inside Bumwolf's mind.
+; One seed per session, guarded by the "1" marker; without it every turn would prepend the primer again and the story would restart forever.
+Make "Turn" DatabaseGet "__server_chat__turn" ; the per-turn counter: 0 only on the turn right after a reset, so this gate cannot fire mid-conversation
+Make "PrimerState" DatabaseGet "ardmark_primer" ; the one-shot seed marker
+IfElse (:Turn = "0")
+[
+	; first turn of the session only
+	IfElse (IsNumber (Search "1" :PrimerState)) []
+	[
+		Make "PrimerText" CallLibrary ["SELF" "v7s_readfile" "text"[ "pointer"]] "examples/ardmark/ardmark_prepend.txt" ; the Ardmark primer text, kept in its own file so the lore can be edited without touching this script
+		DatabaseSet "primer_len" (TextLength :PrimerText) ; the primer's byte length travels in the database -- the length must survive from this seed call to the think-close gate many calls later, and a plain variable would die with the call (the gate re-reads the file for its live number; the database copy is the seeded-state marker)
+		Make "NewStream" (:PrimerText _ GetUserPrompt _ "\n\n" _ (ReadText "examples/ardmark/ardmark_invite.txt"))
+
+		; primer + question + thinking invitation in the model's own voice, then the sentinel
+		SetStream :NewStream
+		DatabaseSet "__server_html_background_image" "ardmark.jpg" ; summer default background, seeded on the first turn so a session reset re-arms it
+		DatabaseSet "__server__chat_avatar_image" "bumwolf_avatar.jpg" ; the persona picture on every bot message
+		DatabaseSet "ardmark_primer" "1" ; one seed per session
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+		PrintBanner "ardmark rag - first turn: primer seeded; think block left open"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+		Print ("ardmark rag - primer_len: " _ (DatabaseGet "primer_len")) ; the stored cut length, shown so a stale value is visible at once
+		Print :NewStream ; the seeded stream, printed whole
+	]
+]
+[]
+
+; ---- step 2: the think-close gate and the belief injection ----
+; This gate fires once per close -- the model's own close tag, the limiter close, or the rescue marker saying a close was forced. It asks the corpus with the stranger's bare question and, when the answer-presence floor clears, writes the facts inside the still-open think block, ahead of the walk lines; below the floor the question is unrelated to the records, no facts are injected, and the answer lines alone arm the visible answer.
+; The bm25_primer flag keeps the rewrite one-shot per turn: the rewrite happens once, every later close is a pass-through, and the answer stage below only ever fires on the turn that actually injected.
+Make "RescueMarker" DatabaseGet "eos_to_think" ; the rescue marker read at the gate head, so the injection sees this call's state
+Make "InjectionDone" DatabaseGet "bm25_primer" ; the turn-state flag: 1 means the facts landed and the answer stage is still owed, 2 means the turn is fully handled with or without a rewrite
+IfElse ((:CurrentToken = :ThinkCloseTag) || (IsNumber (Search "1" :RescueMarker))) ; a close from the model, from the limiter, or forced by the rescue marker opens the injection gate
+[
+	IfElse (IsNumber (Search :InjectionDone "12")) ; 1 and 2 both mean this turn's rewrite window is spent -- probing Search with the marker itself against "12" accepts either without ever matching the armed state
+	[
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+		PrintBanner "ardmark rag - rewrite already done; close passed"
+	]
+	[
+		Make "ThinkingQuery" GetStream ; the model's thinking so far, verbatim
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+		PrintBanner "ardmark rag - think closed; thinking so far:"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+		Print :ThinkingQuery ; the model's thinking at the close, printed whole
+		; The retrieval query is the model's own thinking with the primer cut off, plus the question: the think carries the context and the interpretation, so the lines the corpus returns reflect what the turn is really about -- a generic question over an Ardmark conversation retrieves Ardmark lines because the think relates them. The score floors cannot read this query (persona words hold every think near the same score band), so the gate reads two independent signals: the calibrated floors on the bare question, and the relate decision -- the whole-corpus cosine between the primer-free thinking and the records.
+		Make "PrimerNow" CallLibrary ["SELF" "v7s_readfile" "text"[ "pointer"]] "examples/ardmark/ardmark_prepend.txt" ; the primer text, once per turn, for the cut length and the presence probe
+		Make "PrimerCut" TextLength :PrimerNow ; the number of primer bytes that lead the stream on the seeded turn
+		Make "PrimerAt" Search :PrimerNow :ThinkingQuery ; where the primer sits in the stream -- 0 when it leads the stream (the seeded turn), nothing on later turns
+		Make "OwnWords" :ThinkingQuery ; the retrieval window: the whole thinking, primer removed when the primer is present
+		IfElse (:PrimerAt = 0)
+		[
+			Make "OwnWords" Part :ThinkingQuery :PrimerCut (TextLength :ThinkingQuery) ; the primer prefix leaves the window; the primer's lore words would pull the records on every topic
+		]
+		[]
+		Make "RetrievalQuery" (:OwnWords _ "\n" _ GetUserPrompt) ; the model's own words, then the question on its own line
+		Make "RetrievedFacts" RagSearch :RetrievalQuery :RaggQueryOpen ; BM25 over the records with the full context query, top 6 lines, no floor -- the gate below decides, not the score
+		DatabaseSet "__server_rag_query" :RetrievalQuery ; the web panel: the exact retrieval input this gate ran
+		DatabaseSet "__server_rag_answer" :RetrievedFacts ; the web panel: the corpus lines the query pulled
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+		PrintBanner "ardmark rag - retrieval query: own words + question"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+		Print :RetrievalQuery ; the exact retrieval input
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+		PrintBanner "ardmark rag - bm25 result"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+		Print :RetrievedFacts ; the lines the context pulled
+		Make "RelatePick" Random 5 ; one draw in five loosens the relate floor: the drift-back pull, so Bumwolf occasionally gets pulled toward the records even on a weakly related turn
+		Make "RelateOpts" :RelateQueryTight
+		IfElse :RelatePick < 1 [ Make "RelateOpts" :RelateQueryLoose ] []
+		Make "RelateRaw" CallLibrary ["SELF" "v7_execute" "text" [ "pointer" "pointer" "pointer" "pointer" ]] "examples/rag/bm25_rag.exe" "relate" :OwnWords :RelateOpts ; the Salton cosine between the primer-free thinking and the whole records, judged against the floor inside the tool
+		Make "BareFacts" RagSearch GetUserPrompt :RaggQuery ; the calibrated floor signal: does the bare question alone find answer-bearing lines
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+		PrintBanner "ardmark rag - gate: bare-question facts + relate decision"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+		Print :BareFacts ; the floor's answer for the bare question
+		Print :RelateRaw ; the relate score line plus the decision line the tool decided
+		IfElse ((:BareFacts != "") || (IsNumber (Search "above" :RelateRaw))) ; two independent signals, one is enough: the bare question found its lines, or the thinking itself sits close enough to the records (off-topic thinks measured 0.014-0.027 against the 0.07/0.05 floors, the France think 0.064)
+		[
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - facts injected; re-think set"
+			Make "NewStream" (:ThinkingQuery _ "\n" _ (ReadText "examples/ardmark/ardmark_walk_before.txt") _ GetUserPrompt _ "\n" _ (ReadText "examples/ardmark/ardmark_walk_after.txt") _ "\n" _ :RetrievedFacts _ "\n" _ (ReadText "examples/ardmark/ardmark_drive.txt")) ; the walk room: the belief line, then the records directly (no hand-off sentence -- the owner removed it: the facts speak for themselves), then the two drive lines, then blank air for the model's own walk
+			SetStream :NewStream ; the re-think begins with the facts
+			DatabaseSet "bm25_primer" "1" ; the one-shot flag: this injection never repeats
+			DatabaseSet "__server_rag_injected" "1" ; the web panel: the facts went into the thinking
+			Print :NewStream ; the rewritten stream, printed whole
+			Print "--------------------------" ; everything above this line belongs to the injection
+
+		; The background scan reads the model's own words with the primer cut off: the primer names every season and every place, so a window that includes it would let our own seed set the scenery. The primer is re-read here for the live cut length (database values come back as strings and the Part index needs a number); the stored primer_len marks that the seed happened.
+		Make "PrimerNow" CallLibrary ["SELF" "v7s_readfile" "text"[ "pointer"]] "examples/ardmark/ardmark_prepend.txt" ; the primer text again, once per turn, for the cut length and the presence probe
+		Make "PrimerCut" TextLength :PrimerNow ; the number of primer bytes that lead the stream on the seeded turn
+		Make "PrimerAt" Search :PrimerNow :ThinkingQuery ; where the primer sits in the stream -- 0 when it leads the stream (the seeded turn), nothing on later turns
+		Make "OwnWords" :ThinkingQuery ; the scan window: the whole thinking, primer removed when the primer is present
+		IfElse (:PrimerAt = 0)
+		[
+			Make "OwnWords" Part :ThinkingQuery :PrimerCut (TextLength :ThinkingQuery) ; the primer prefix leaves the window; what remains starts at the question hand-off
+		]
+		[]
+
+		; The background is chosen from what the thinking names, over the same primer-free window -- the wording inside the primer cannot set the season.
+		; Later matches win: summer comes first, then winter, then coast together with winter, then dragon.
+		; Search returns a NUMBER for a hit and nothing for a miss, so every test for a hit goes through IsNumber.
+		IfElse IsNumber (Search "summer" :OwnWords)
+		[
+			DatabaseSet "__server_html_background_image" "ardmark.jpg" ; the summer seas around Kalvstrand
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - summer in thinking; background ardmark.jpg"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+			Print "ardmark.jpg" ; the summer background name echoed under its banner
+		]
+		[]
+		; no summer in the thinking: the background stays as it was
+		IfElse IsNumber (Search "winter" :OwnWords)
+		[
+			DatabaseSet "__server_html_background_image" "ardmark_winter.jpg" ; the frozen Grey Fjord takes the page
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - winter in thinking; background ardmark_winter.jpg"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+			Print "ardmark_winter.jpg"
+		]
+		[]
+		; a plain winter keeps the fjord image: the coast combo below may still claim it
+		IfElse ((IsNumber (Search "coast" :OwnWords)) && (IsNumber (Search "winter" :OwnWords))) ; both words at once claim the frozen shore
+		[
+			DatabaseSet "__server_html_background_image" "ardmark_coast.jpg" ; coast and winter at once: the frozen shore under the cliffs
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - coast+winter in thinking; background ardmark_coast.jpg"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+			Print "ardmark_coast.jpg" ; the coast background name echoed under its banner
+		]
+		[]
+		IfElse IsNumber (Search "dragon" :OwnWords)
+		[
+			DatabaseSet "__server_html_background_image" "ardmark_dragon.jpg" ; the wyrm of Surtmark beats every season
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - dragon in thinking; background ardmark_dragon.jpg"
+	; SetCursor 1 7 ; the data under a banner reads from line 7: one blank line below the moved label, no cursor jerk
+			Print "ardmark_dragon.jpg" ; the dragon background name echoed under its banner
+		]
+		[]
+		; no dragon either: whatever the earlier checks set stays
+		]
+		[
+			; the floor found nothing or the lines never spoke the question: no facts and no walk room -- but the answer lines still arm the visible answer, because an unrewritten close lets the model print stars and markdown into the answer
+			DatabaseSet "eos_to_think" "0" ; the rescue marker is consumed here, the same way the answer stage consumes it on the injected path
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+			PrintBanner "ardmark rag - no records matched; answer lines armed only"
+			; The same fence shape the answer stage uses: one newline after the respond trigger, the closing tag, then two newlines.
+			IfElse (:Turn = "0")
+			[
+				Make "NewStream" (GetStream _ :AnswerJoin _ GetUserPrompt _ "\n\nOkay, this is what i have to react to." _ (ReadText "examples/ardmark/ardmark_answer.txt") _ "\n" _ :ThinkCloseTag _ "\n\n" _ (ReadText "examples/ardmark/ardmark_greet.txt")) ; first turn: question, answer cue, clamps, respond trigger, close, then the greeting opens the answer -- no facts between
+			]
+			[
+				Make "NewStream" (GetStream _ :AnswerJoin _ GetUserPrompt _ "\n" _ (ReadText "examples/ardmark/ardmark_answer.txt") _ "\n" _ :ThinkCloseTag _ "\n\n") ; later turns: the same scaffold without the greeting
+			]
+			SetStream :NewStream
+			DatabaseSet "bm25_primer" "2" ; the turn is fully handled: no facts landed, the answer lines are armed, later closes stay silent
+			DatabaseSet "__server_rag_injected" "0" ; the web panel: the gate suppressed, the role answers on its own
+			Print :NewStream ; the armed stream, printed whole
+			Print "--------------------------" ; everything above this line belongs to the answer arming
+		]
+	]
+]
+[]
+
+; ---- step 3: the answer stage ----
+; When the model closes its think again after the facts landed on an earlier call, the rewrite appends the question hand-off, the answer cue, the format and list clamps, the respond trigger and the think close; the greeting opens the visible answer on the first turn.
+; Only the last SetStream of a hook call takes effect, so this stage must never fire in the same call as the injection; the InjectionDone flag read at the gate head proves the facts went in earlier, and the marker moves to 2 so later closes stay silent.
+IfElse ((:CurrentToken = :ThinkCloseTag) && (IsNumber (Search "1" :InjectionDone)))
+[
+	DatabaseSet "eos_to_think" "0" ; the marker is consumed now
+	; clearscreen ; the banner owns the screen: clear before the block
+	; SetCursor 1 5 ; the banner block starts at line 5, column 1 (line 3 stays the live heartbeat)
+	PrintBanner "ardmark rag - answer close seeded; visible answer armed"
+	; The fence shape keeps the model talking after the close: one newline after the respond trigger, the closing tag, then two newlines.
+	IfElse (:Turn = "0")
+	[
+		Make "NewStream" (GetStream _ :AnswerJoin _ GetUserPrompt _ "\n" _ (ReadText "examples/ardmark/ardmark_answer.txt") _ "\n" _ :ThinkCloseTag _ "\n\n" _ (ReadText "examples/ardmark/ardmark_greet.txt")) ; first turn: question, answer cue, clamps, respond trigger, close, then the greeting opens the answer
+	]
+	[
+		Make "NewStream" (GetStream _ :AnswerJoin _ GetUserPrompt _ "\n" _ (ReadText "examples/ardmark/ardmark_answer.txt") _ "\n" _ :ThinkCloseTag _ "\n\n") ; later turns: the same stream without the greeting
+	]
+	SetStream :NewStream
+	DatabaseSet "bm25_primer" "2" ; the opener is in: nothing repeats on later closes
+	Print :NewStream ; the armed stream, printed whole
+	Print "--------------------------" ; everything above belongs to the answer rewrite
+]
+[]
+
+; ==================================================================
+; DONE -- no more blocks; every branch has an explicit [] closing arm
+; ==================================================================
+

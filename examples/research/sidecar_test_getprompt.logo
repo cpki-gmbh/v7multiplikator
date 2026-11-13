@@ -1,0 +1,20 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_test_getprompt.logo
+; Verification for GetUserPrompt (RAG query augmentation):
+; fetch the current chat turn's raw user prompt via CallLibrary and print it,
+; then do nothing else (stream untouched - pure export test).
+; Descriptor uses SELF = GetProcAddress on the v7 DLL's own HMODULE.
+; Type names MUST be quoted lowercase: the four type atoms are interned as
+; STRING atoms ("STRING because CallLibrary descriptors quote type names") and
+; sl_ffi_invoke compares them by atom offset, so a bare Pointer is a different
+; atom and the call dies on "return type must be integer, pointer, text, or void".
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- the test's trigger point
+  PrintBanner "TEST: fetching user prompt via GetUserPrompt"
+  Make "prompt" GetUserPrompt                    ; the current chat turn's raw user prompt
+  PrintBanner "USER PROMPT POINTER RETURNED"
+  Print :prompt                                  ; the prompt text itself
+] []

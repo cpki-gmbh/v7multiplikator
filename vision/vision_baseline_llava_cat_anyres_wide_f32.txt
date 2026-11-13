@@ -1,0 +1,5 @@
+dll: bin\v7_threading.dll
+loading: weights\databases\llava_onevision_qwen2_0.5b\lz4ht.db
+question: What is in this image?
+mode: F32
+A cat

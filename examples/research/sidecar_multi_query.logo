@@ -1,0 +1,44 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_multi_query.logo
+; RAG experiment 4: run TWO RAG queries and concatenate the results
+; Query 1: the model's full thought text (rich, long query - BM25 loves detail)
+; Query 2: just the user prompt "what is a cat?" (short, focused query)
+; Tests whether broader retrieval coverage produces stronger injection.
+
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  Make "stream" GetStream                        ; the stream up to the think-close
+  ; Pass-2 guard (stateless): at hook time the current </think> piece is NOT
+  ; yet in the stream, so a fresh pass-1 stream has no closing tag. If the
+  ; stream already contains one, our rewrite closed it earlier this turn ->
+  ; accept the tag instead of rewriting again (prevents re-retrieve loops
+  ; when the model emits a second </think>).
+  IfElse IsNumber Search "</think>" :stream [
+    PrintBanner "MULTI-QUERY: PASS 2 -> rewrite already applied, accept tag"
+  ] [
+  Make "querythought" :stream                  ; query 1: the full thought text, rich and long
+  Make "queryprompt" "what is a cat?"          ; query 2: the short, focused user prompt
+  Make "ragthought" RagSearch :querythought "base=examples/research/ragg_base.txt"   ; what the long query found
+  Make "ragprompt" RagSearch :queryprompt "base=examples/research/ragg_base.txt"     ; what the short query found
+  Make "combined" ""                             ; both answers, newline-separated
+  IfElse (:ragthought = "") [] [Make "combined" :ragthought] []   ; the long query contributes first
+  IfElse (:ragprompt = "") [] [IfElse (:combined = "") [Make "combined" :ragprompt] [Make "combined" :combined _ "\n" _ :ragprompt]] []
+  IfElse (:combined = "") [] [                 ; both queries missed -> nothing is injected
+    Make "newstream" :stream _ "\nADDITIONAL CONTEXT: " _ :combined _ "\n</think>"   ; append both answers, then CLOSE
+    PrintBanner "MULTI-QUERY QUERY1 thought text"
+    Print :querythought                         ; the long query that was searched
+    PrintBanner "MULTI-QUERY QUERY2 prompt"
+    Print :queryprompt                          ; the short query that was searched
+    PrintBanner "MULTI-QUERY RAG1"
+    Print :ragthought                           ; what the long query found
+    PrintBanner "MULTI-QUERY RAG2"
+    Print :ragprompt                            ; what the short query found
+    PrintBanner "NEW STREAM"
+    Print :newstream                            ; the rewritten stream handed to SetStream
+    SetStream :newstream                        ; KV rollback, re-encode and prefill of the new stream
+  ] []
+  ]
+] []

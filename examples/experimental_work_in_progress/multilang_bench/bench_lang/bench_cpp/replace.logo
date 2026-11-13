@@ -1,0 +1,34 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; ============================================================================
+; bench_cpp\replace.logo -- the replace-all workload, for the SectorLogo C++ port.
+; See fib.logo for why these four files exist and what the `iters` argument is
+; for. The expected result is 240 bytes ("dog " sixty times), checked in
+; bench_sectorlogo.logo's gate block.
+;
+; The hay is a LITERAL, and that is load-bearing rather than a shortcut.
+; bench_sectorlogo.logo builds it with sixty `_` calls OUTSIDE its timed region
+; and then times a thousand replaceall calls; here the whole script is the
+; sample, so a sixty-concat setup inside it would land in the measurement and
+; contribute about half of it. A literal costs one string intern per run -- 240
+; bytes, against the ~29 KB the workload itself scans and rebuilds -- so the
+; setup is under a percent and `iters` amortizes the rest correctly. Rebuilding
+; it with a Repeat loop would silently put the setup back into the number.
+; ============================================================================
+
+Define "replaceall" [:text :old :new] [             ; replaceall text old new -- every occurrence of old becomes new
+  Local "pos"                                       ; match position of the next occurrence of old
+  Repeat [                                          ; endless: the loop ends when Search returns NIL
+    Make "pos" Search :old :text
+    IfElse IsNumber :pos [                          ; a NUMBER means old is still present in the haystack
+      Make "text" Replace :text :old :new            ; Replace rewrites only the first hit, so the loop drives it
+    ] [
+      Stop                                          ; old is exhausted -- leave the loop
+    ]
+  ]
+  Output :text                                      ; the fully rewritten haystack
+]
+
+Replaceall "cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat cat " "cat " "dog "  ; the sample: 60 x "cat " becomes 60 x "dog ", 240 bytes

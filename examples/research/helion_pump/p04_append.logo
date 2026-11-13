@@ -1,0 +1,23 @@
+; p04_append.logo -- P0-4 TREATMENT sidecar for the rewrite-cost
+; micro-measurement. At the close-think piece, appends ONE fixed sentence to
+; the accumulated stream and closes the think block again: an append-only
+; rewrite with a single SetStream and no retrieval, so the measured difference
+; against p04_noop.logo isolates the SetStream rewrite machinery (KV rollback,
+; re-encode, re-prefill) at a fixed, minimal insertion size.
+; The close-think literal is built with the split-form concat trick because a
+; whole-tag literal can be eaten by tooling.
+; Pass-2 guard: after the rewrite the re-generated stream produces a second
+; close-think piece; the stream then already contains a close tag and the
+; piece is accepted instead of rewriting again.
+
+Make "closetag" "</thi" _ "nk>" ; close-think tag via split-form concat
+IfElse (:PIECE = :closetag) [ ; only act on the close-think piece
+  Make "stream" GetStream ; grab accumulated stream
+  IfElse IsNumber Search :closetag :stream [ ; already rewritten? accept
+    PrintBanner "P04-APPEND: PASS 2 -> rewrite already applied, accept tag"
+  ] [ ; append one fixed sentence and re-close
+    Make "newstream" :stream _ "\nThe HX-340 is certified for 40 years of design life in continuous duty.\n" _ :closetag ; build appended stream
+    PrintBanner "P04-APPEND: SetStream with fixed one-sentence append"
+    SetStream :newstream ; trigger KV rollback + re-prefill
+  ]
+] []

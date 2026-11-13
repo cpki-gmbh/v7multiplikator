@@ -1,0 +1,90 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_answer_gated_continue.logo
+; RAG experiment 12: THINK-Continue + ANSWER-PRESENCE GATE.
+; 11c mechanism plus a pre-injection check: the RAG answer must actually
+; speak to the QUESTION-BEARING HEAD (first ~120 chars of think text, which
+; restates the user question). The check is a COVERAGE ratio -- how many of
+; the answer's content words also occur in the question head -- floored at
+; 25%. That is the generic form of the gate: it asks whether the retrieved
+; content is about the question, and never names a topic, so it holds for any
+; corpus. Lots of PRINTs so every decision is visible in the run log.
+
+; --- utility: strip trailing sentence punctuation from a word ---
+Define "strippunct" [:word] [                     ; strippunct word -- word without its trailing sentence punctuation
+  Repeat [                                         ; endless: Stops on the first non-punctuation byte
+    Make "len" TextLength :word
+    IfElse :len < 1 [Stop] []                     ; nothing left to strip
+    Make "last" Part :word :len - 1 1
+    IfElse ((((((((:last = ".") || (:last = ",")) || (:last = ";")) || (:last = ":")) || (:last = "!")) || (:last = "?")) || (:last = "\"")) || (:last = "'")) [   ; one more punctuation byte at the end
+      Make "word" Part :word 0 :len - 1           ; drop it and keep walking
+    ] [Stop]                                      ; the last byte is a real character -- done
+  ]
+  Output :word
+]
+
+; --- utility: overlaps answer question -> 1 when the answer shares at least
+;     a quarter of its content words with the question. Content-agnostic: a
+;     retrieval that missed the question shares almost nothing, whatever the
+;     topic, so no keyword list is needed. ---
+Define "overlaps" [:answer :question] [           ; overlaps answer question -- 1 when the answer is about the question
+  Local "rest" "probe" "words" "word" "hits" "total"
+  Make "rest" Lowercase :answer                   ; both sides probed in lowercase
+  Make "probe" Lowercase :question
+  Make "words" Split :rest " "                    ; the answer as a word list
+  Make "total" 0                                 ; content words counted so far
+  Make "hits" 0                                  ; how many of them the question also contains
+  Repeat [                                         ; endless: the word list ends the walk
+    IfElse (:words = []) [Stop] []              ; an empty list is the loop's exit
+    Make "word" stripPunct First :words           ; punctuation would break the substring probe
+    Make "words" ButFirst :words
+    IfElse ((TextLength :word) > 3) [       ; words of 3 characters or fewer are too weak to count
+      Make "total" :total + 1
+      IfElse IsNumber Search :word :probe [ Make "hits" :hits + 1 ] [] []   ; IsNumber, because a hit at position 0 is falsy
+    ] []
+  ]
+  IfElse (:total < 1) [ Output 0 ] [         ; no content word at all -> not about the question
+    IfElse ((:hits * 4) > :total) [ Output 1 ] [ Output 0 ]   ; over 25% shared coverage
+  ]
+]
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  PrintBanner "HOOK: got closing think tag"
+  Make "stream" GetStream                        ; the stream up to the think-close
+  PrintBanner "STREAM Length"                    ; the injection point is reached
+  Print StreamLength :stream
+  Make "markerpos" Search "reviewed the reference facts" :stream   ; our own marker from pass 1
+  PrintBanner "MARKER POSITION (NIL = not found)"
+  Print :markerpos                               ; the marker's byte offset, or NIL
+  IfElse IsNumber :markerpos [
+    PrintBanner "PASS 2: marker present -> DO NOTHING, accept tag"
+  ] [
+    PrintBanner "PASS 1: marker absent -> evaluate answer-presence gate"   ; first pass: gate, then inject
+    Make "query" :stream                          ; the think text doubles as query expansion
+    Make "qhead" Part :query 0 120                ; the question-bearing head of the think text
+    PrintBanner "QUESTION HEAD (first 120 chars of think)"
+    Print :QHEAD                                 ; what the gate measures overlap against
+    Make "hits" RagSearch :query "base=examples/research/ragg_base.txt"   ; BM25 over the knowledge base
+    PrintBanner "RAG ANSWER"
+    Print :hits                                   ; the retrieved lines, "" when below the floor
+    IfElse (:hits = "") [                       ; an empty answer is suppressed outright
+      PrintBanner "RAG empty -> SUPPRESS (no injection)"
+    ] [
+      Make "overlap" overlaps :hits :QHEAD        ; the generic answer-presence gate
+      PrintBanner "GATE OVERLAP SCORE (1 = inject, 0 = suppress)"
+      Print :overlap                              ; the gate decision
+      IfElse :overlap >= 1 [
+        PrintBanner "GATE OPEN -> INJECT RAG + marker, keep thinking"
+        Make "newstream" :stream _ "\n" _ :hits _ "\nI have reviewed the reference facts above. Let me now finalize my answer plan."   ; append; the think block stays OPEN
+        PrintBanner "NEW STREAM (think NOT closed)"
+        Print :newstream                        ; the rewritten stream handed to SetStream
+        SetStream :newstream                    ; KV rollback, re-encode and prefill of the new stream
+        PrintBanner "SetStream DONE"
+      ] [
+        PrintBanner "GATE CLOSED -> SUPPRESS (question not answerable from KB)"
+      ]
+    ]
+  ]
+] []

@@ -1,0 +1,40 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_gated_replace_think.logo
+; RAG experiment 6 (v4): REPLACE-THINK behind the retrieval floor.
+; The relevance gate is NOT a keyword list: it is RagSearch's own score
+; floor. An off-topic query scores below the floor, the tool returns "",
+; and nothing is injected. That is strictly safer than the v3 append
+; fallback, which injected the answer into a stream the query had nothing
+; to do with. There is no append branch, because an empty answer has
+; nothing to append.
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  Make "stream" GetStream                        ; the stream up to the think-close
+  ; Pass-2 guard (stateless): at hook time the current </think> piece is NOT
+  ; yet in the stream, so a fresh pass-1 stream has no closing tag. If the
+  ; stream already contains one, our rewrite closed it earlier this turn ->
+  ; accept the tag instead of rewriting again (prevents re-retrieve loops
+  ; when the model emits a second </think>).
+  IfElse IsNumber Search "</think>" :stream [
+    PrintBanner "GATED: PASS 2 -> rewrite already applied, accept tag"
+  ] [
+  Make "query" :stream                          ; the think text doubles as query expansion
+  Make "hits" RagSearch :query "base=examples/research/ragg_base.txt"   ; BM25 over the knowledge base
+  ; A non-empty answer means the query cleared the score floor -- that IS
+  ; the relevance signal. Replace the whole think block with it.
+  IfElse (:hits = "") [] [                    ; below the floor -> nothing is injected at all
+    Make "newstream" :hits _ "</think>"         ; the RAG answer becomes the entire think block
+    PrintBanner "GATED: above floor -> REPLACE-THINK"
+    PrintBanner "RAG QUERY"
+    Print :query                                 ; the query the floor was applied to
+    PrintBanner "RAG ANSWER"
+    Print :hits                                  ; the lines that cleared the floor
+    PrintBanner "NEW STREAM"
+    Print :newstream                            ; the rewritten stream handed to SetStream
+    SetStream :newstream                        ; KV rollback, re-encode and prefill of the new stream
+  ] []
+  ]
+] []

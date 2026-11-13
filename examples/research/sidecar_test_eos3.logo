@@ -1,0 +1,21 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_test_eos3.logo
+; Distinguish the TERMINAL eos token from mid-stream token-id collisions:
+; print TOK, PIECE and stream-len together on every call where TOK==EndToken,
+; plus one line for the final 5 calls overall. Run with high -n.
+
+IfElse (:TokenNumber = EndToken) [             ; a token-id collision with the end-of-text token
+  PrintBanner "TOK==EndToken hit: TOK / PIECE / LEN"
+  Print :TokenNumber                              ; the colliding token id
+  Print :PIECE                                    ; the text it decoded to
+  Print StreamLength                              ; the stream length at the moment of the hit
+] [
+  IfElse >= Position 0 [
+    IfElse (:PIECE = "</think>") [
+      PrintBanner "think-close seen"
+    ] []
+  ] []
+]

@@ -1,0 +1,179 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+
+; sidecar_memory_rag_v4.logo
+; PERSISTENT MEMORY RAG v4 -- core/archival split (exp 21):
+;
+;   Distill: llm_text_processor -distill emits tagged lines (USER:/SELF:/NOTE:). The sidecar
+;     routes USER lines to user_facts.txt (core memory), NOTE lines to
+;     ragg_base.txt (archival), DISCARDS SELF lines (parametric knowledge
+;     covers them; they were the exp-20 pollution source).
+;
+;   Recall (first </think>): query BOTH corpora. User facts are injected
+;     First under "Facts about the user:" framing, then archival memories.
+;     recent=1 on the user corpus makes "what do you remember about me?"
+;     return the profile even with zero BM25 overlap.
+;
+;   PASS 2 (second </think>): flag set -> accept tag, clear flag.
+;
+;   EOS: strip think tags, distill, route tagged lines.
+;
+; Corpora: examples/rag/memory/user_facts.txt + ragg_base.txt
+
+; --- utility: strip trailing \n or \r\n from a string ---
+Define "striptrail" [:text] [                     ; striptrail text -- text without one trailing \n or \r\n
+  Make "len" StreamLength :text
+  IfElse :len < 1 [Output :text] [
+    Make "last" Part :text :len - 1 1
+    IfElse (:last = "\n") [                     ; only a trailing newline gets stripped
+      IfElse :len < 2 [Output ""] [               ; a lone newline leaves nothing behind
+        Make "prev" Part :text :len - 2 1
+        IfElse (:prev = "\r") [
+          Output Part :text 0 :len - 2            ; CRLF: drop both bytes
+        ] [
+          Output Part :text 0 :len - 1            ; bare LF: drop the one byte
+        ]
+      ]
+    ] [Output :text]                              ; no trailing newline -- unchanged
+  ]
+]
+
+; --- utility: replace ALL occurrences of old with new in text ---
+Define "replaceall" [:text :old :new] [            ; replaceall text old new -- every occurrence of old becomes new
+  Make "result" :text
+  Repeat [                                         ; endless: the loop ends when Search returns NIL
+    Make "found" Search :old :result
+    IfElse IsNumber :found [                       ; a NUMBER means old is still present in the haystack
+      Make "result" Replace :result :old :new       ; Replace rewrites only the first hit, so the loop drives it
+    ] [
+      Stop                                         ; old is exhausted -- leave the loop
+    ]
+  ]
+  Output :result                                   ; the fully rewritten string
+]
+
+; --- utility: route one distilled line by its tag. Returns "" when the
+;     line is consumed (SELF discard / blank), else returns the payload. ---
+Define "routeline" [:line] [                      ; routeline line -- file one tagged line, return "" once consumed
+  IfElse (:line = "") [Output ""] [              ; a blank line has no tag to route on
+    IfElse IsNumber Search "USER: " :line [
+      Make "payload" Replace :line "USER: " ""    ; the fact about the user, without its tag
+      Make "writeok" WriteTextFile "examples/rag/memory/user_facts.txt" :payload _ "\n" 1
+      Output ""                                   ; core memory: consumed
+    ] [
+      IfElse IsNumber Search "SELF: " :line [     ; parametric knowledge -- it would pollute the corpus
+        PrintBanner "MEM-RAG-v4: SELF line discarded"
+        Output ""
+      ] [
+        IfElse IsNumber Search "NOTE: " :line [
+          Make "payload" Replace :line "NOTE: " "" ; the note, without its tag
+          Make "writeok" WriteTextFile "examples/rag/memory/ragg_base.txt" :payload _ "\n" 1
+          Output ""                               ; archival memory: consumed
+        ] [
+          ; untagged fallback: treat as archival NOTE
+          Make "writeok" WriteTextFile "examples/rag/memory/ragg_base.txt" :line _ "\n" 1
+          Output ""
+        ]
+      ]
+    ]
+  ]
+]
+
+; ============================================================
+; MAIN HOOK LOGIC
+; ============================================================
+
+; --- HOOK 2: EOS -- distill the turn into tagged memories ---
+IfElse (:TokenNumber = EndToken) [              ; HOOK 2: the turn ended -- distil it into tagged memories
+  PrintBanner "MEM-RAG-v4: EOS detected"
+
+  DatabaseSet "mem_rag_done" ""                   ; a new turn always starts on pass 1
+
+  Make "full" GetStream                           ; the whole generated stream, think block included
+  Make "stripped" replaceAll :full "<think>" ""   ; drop the opening think tag, keep the thought
+  Make "stripped" replaceAll :stripped "</think>" ""   ; drop the closing think tag, keep the answer
+
+  Make "prompt" GetUserPrompt                    ; the prompt that started this turn
+  IfElse (:prompt = "") [
+    Make "turn" :stripped                         ; no prompt -- the turn text stands alone
+  ] [
+    Make "turn" :prompt _ " -> " _ :stripped       ; prompt and turn text joined by an arrow
+  ]
+
+  Make "thought" RagDistill :turn                 ; the tagged lines distilled from this turn
+  PrintBanner "MEM-RAG-v4: distilled thoughts"
+  Print :thought                                  ; USER:/SELF:/NOTE: lines, "" when distillation failed
+
+  ; route each tagged line (split on \n, Repeat over 9 possible lines)
+IfElse (:thought = "") [                      ; an empty thought is not a memory -- skip the routing
+    PrintBanner "MEM-RAG-v4: empty thought -- skip"
+  ] [
+    Make "rest" :thought                           ; the distilled text still waiting to be split
+    Repeat [                                       ; endless: the loop ends when :rest runs out
+      IfElse (:rest = "") [Stop] [
+        Make "cut" Search "\n" :rest              ; the next newline in what is left of the distilled text
+        IfElse IsNumber :cut [                          ; a NUMBER means a newline is there to split on
+          Make "oneline" Part :rest 0 :cut         ; everything before the newline
+          Make "rest" Part :rest :cut + 1 StreamLength :rest    ; everything after it
+        ] [
+          Make "oneline" :rest                     ; last line: no newline after it
+          Make "rest" ""
+        ]
+        Make "oneline" stripTrail :oneline         ; drop the trailing newline before routing
+        Make "sink" routeLine :oneline             ; USER -> core, NOTE -> archival, SELF -> dropped
+      ]
+    ]
+    PrintBanner "MEM-RAG-v4: lines routed"
+  ]
+
+] [
+  ; --- HOOK 1: think-close (</think>) ---
+  IfElse (:PIECE = "</think>") [                 ; HOOK 1: the think block closed -- pass 1 or pass 2
+    Make "flag" DatabaseGet "mem_rag_done"
+    IfElse IsNumber Search "s" :flag [
+      PrintBanner "MEM-RAG-v4: PASS 2 -> accept tag, clear flag"   ; our marker is present: the restart already happened
+      DatabaseSet "mem_rag_done" ""                ; arm pass 1 for the next think-close
+    ] [
+      ; build query: user prompt + think text
+      Make "stream" GetStream                        ; the think text that is about to be replaced
+      Make "query" :stream                      ; the think text alone, before the prompt is prepended
+      Make "prompt" GetUserPrompt
+      IfElse (:prompt = "") [] [
+        Make "query" :prompt _ "\n" _ :stream    ; prompt on its own line, then the think text
+      ]
+
+      ; core recall: user_facts.txt (recent fallback = profile recall)
+      Make "userhits" RagSearch :query "maxlines=3;dedup=0.4;recency=0.4;recent=1;base=examples/rag/memory/user_facts.txt"   ; the core corpus: facts about the user
+      ; archival recall: ragg_base.txt
+      Make "archivehits" RagSearch :query "maxlines=3;dedup=0.4;recency=0.4;base=examples/rag/memory/ragg_base.txt"   ; the archival corpus: everything else
+
+      PrintBanner "MEM-RAG-v4: user facts"
+      Print :userhits                            ; what the core corpus (user_facts.txt) recalled
+      PrintBanner "MEM-RAG-v4: archival facts"
+      Print :archivehits                         ; what the archival corpus (ragg_base.txt) recalled
+
+      IfElse ((:userhits = "") && (:archivehits = "")) [   ; both corpora missed -> nothing to inject
+        PrintBanner "MEM-RAG-v4: no memories -> accept tag"
+      ] [
+        Make "ruclean" stripTrail :userhits     ; drop the newline each RagSearch appends
+        Make "raclean" stripTrail :archivehits
+        ; user facts First under explicit framing, then archival
+        IfElse (:ruclean = "") [
+          Make "newstream" "Memories from earlier conversations:\n" _ :raclean _ "\n\nthe user asked: \"" _ :prompt _ "\".\nnow let me think about the answer.\n"   ; archival only
+        ] [
+          IfElse (:raclean = "") [
+            Make "newstream" "Facts about the user from earlier conversations:\n" _ :ruclean _ "\n\nthe user asked: \"" _ :prompt _ "\".\nnow let me think about the answer.\n"   ; core only
+          ] [
+            Make "newstream" "Facts about the user from earlier conversations:\n" _ :ruclean _ "\nOther memories:\n" _ :raclean _ "\n\nthe user asked: \"" _ :prompt _ "\".\nnow let me think about the answer.\n"   ; both, core first
+          ]
+        ]
+        PrintBanner "MEM-RAG-v4: new stream"
+        Print :newstream                        ; the rewritten stream handed to SetStream
+        SetStream :newstream                    ; KV rollback, re-encode and prefill of the new stream
+        DatabaseSet "mem_rag_done" "s"            ; the marker Search looks for on the next think-close
+      ]
+    ]
+  ] []
+]

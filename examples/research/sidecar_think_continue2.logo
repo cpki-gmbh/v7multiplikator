@@ -1,0 +1,42 @@
+; v7 - part of the v7 inference engine
+; Copyright (C) 2026 Görg Pflug & CPKI GmbH
+; License: GPL v3 (see LICENSE)
+
+; sidecar_think_continue2.logo
+; RAG experiment 11b: THINK-Continue with STRONG marker.
+; Same two-phase mechanism as 11a but the marker phrase reads like the
+; START of an incomplete deliberation, forcing the model to continue
+; reasoning over the RAG facts instead of closing the think immediately.
+; Lots of PRINTs so every decision is visible in the run log.
+
+
+IfElse (:PIECE = "</think>") [                  ; the think block closed -- this is the injection point
+  PrintBanner "HOOK: got closing think tag"
+  Make "stream" GetStream                        ; the stream up to the think-close
+  PrintBanner "STREAM Length"                    ; the injection point is reached
+  Print StreamLength :stream
+  Make "markerpos" Search "let me double-check" :stream   ; our own strong marker from pass 1
+  PrintBanner "MARKER POSITION (NIL = not found)"
+  Print :markerpos                               ; the marker's byte offset, or NIL
+  IfElse IsNumber :markerpos [
+    PrintBanner "PASS 2: marker present -> DO NOTHING, accept tag"
+  ] [
+    PrintBanner "PASS 1: marker absent -> INJECT RAG, keep thinking"   ; first pass: inject and continue
+    Make "query" :stream                          ; the think text doubles as query expansion
+    PrintBanner "RAG QUERY"
+    Print :query                                 ; the query the floor is applied to
+    Make "hits" RagSearch :query "base=examples/research/ragg_base.txt"   ; BM25 over the knowledge base
+    PrintBanner "RAG ANSWER"
+    Print :hits                                   ; the bare reference lines, "" when the floor fired
+    IfElse (:hits = "") [                       ; an empty answer is suppressed by the server floor
+      PrintBanner "RAG empty -> DO NOTHING this pass"
+    ] [
+      Make "newstream" :stream _ "\n" _ :hits _ "\nWait, let me double-check these facts and revise my answer. The key points I missed are:"   ; append, then the STRONG marker; the block stays OPEN
+      PrintBanner "NEW STREAM (think NOT closed - ends mid-deliberation)"
+      Print :newstream                            ; the rewritten stream handed to SetStream
+      PrintBanner "CALLING SetStream"
+      SetStream :newstream                        ; KV rollback, re-encode and prefill of the new stream
+      PrintBanner "SetStream DONE - generation continues in think mode"
+    ]
+  ]
+] []

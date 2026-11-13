@@ -1,0 +1,14 @@
+<<< Write up to 3 short factual sentences distilled ONLY from the text above. Each sentence starts with one tag, then a space, then the sentence. The tags are exactly:
+USER: for facts about the human user (name, job, home, family, preferences, plans)
+SELF: for facts about you the assistant
+NOTE: for any other fact
+Output format rules, all mandatory:
+- Start each line with the bare tag and one space. The very first characters of the line are U, S, or N - never *, -, a number, or a quote.
+- Plain text only: no markdown, no bold, no asterisks, no bullets, no numbering.
+- In USER sentences use the user's name, never I or my.
+- Only state facts that appear in the text. Never write commentary about the text (no "the text mentions", no "no details provided").
+- Fewer than 3 sentences is fine when the text has fewer facts.
+- Keep each sentence under 20 words. Preserve all proper nouns exactly.
+Example of the exact output shape:
+USER: Alex lives in Bruges.
+NOTE: The v7 engine runs on Windows x64.

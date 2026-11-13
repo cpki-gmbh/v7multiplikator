@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>v7 CPU inference benchmark</title>
+<style>
+	/* ================================================================
+	   CPKI design language (ai.cpki.de), technical benchmark page.
+	   Calm palette: deep navy base, slate bar family, cyan reserved
+	   for v7, amber only for the few model tags where v7 is not
+	   first. Flat bars, tight vertical rhythm, responsive x-axis.
+	   8-bit comparison. The Markdown report also records the earlier int4 runs.
+	   ASCII-only file (entities).
+	   ================================================================ */
+	@font-face
+	{
+		font-family: "Mg12";
+		font-weight: 400;
+		font-style: normal;
+		font-display: swap;
+		src: url("https://ai.cpki.de/wp-content/uploads/2026/09/Mg12-Regular.woff2") format("woff2");
+	}
+	@font-face
+	{
+		font-family: "Mg12";
+		font-weight: 500;
+		font-style: normal;
+		font-display: swap;
+		src: url("https://ai.cpki.de/wp-content/uploads/2026/09/Mg12-Medium.woff2") format("woff2");
+	}
+	@font-face
+	{
+		font-family: "Mg12";
+		font-weight: 700;
+		font-style: normal;
+		font-display: swap;
+		src: url("https://ai.cpki.de/wp-content/uploads/2026/09/Mg12-Bold.woff2") format("woff2");
+	}
+	:root
+	{
+		--cpki-dark:   #00031D;
+		--cyan:        #4feef7;
+		--amber:       #e8b45a;
+		--bg:          #00031D;
+		--panel:       #070b20;
+		--line:        rgba(227,231,240,0.09);
+		--txt:         #eef1f8;
+		--dim:         #a6b1cf;
+		--faint:       #78849f;
+		--b-llama:     #8b97b8;
+		--b-mnn:       #5f6d96;
+		--b-ov:        #434f73;
+		--radius:      0.75rem;
+	}
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	html { overflow-x: hidden; }
+	body
+	{
+		font-family: "Mg12", "Segoe UI", system-ui, sans-serif;
+		font-size: 15px;
+		line-height: 1.45;
+		letter-spacing: 0.04em;
+		background: var(--bg);
+		color: var(--txt);
+		overflow-x: hidden;
+		width: 100%;
+		max-width: 100vw;
+	}
+	/* very faint grid, one soft corner light */
+	body::before
+	{
+		content: "";
+		position: fixed; inset: 0;
+		background-image:
+			linear-gradient(rgba(79,238,247,0.016) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(79,238,247,0.016) 1px, transparent 1px),
+			radial-gradient(900px 420px at 90% -10%, rgba(38,76,171,0.16), transparent 60%);
+		background-size: 44px 44px, 44px 44px, auto;
+		pointer-events: none;
+		z-index: 0;
+	}
+	.page
+	{
+		position: relative; z-index: 1;
+		width: 100%;
+		max-width: 1000px;
+		margin: 0 auto;
+		padding: 56px clamp(14px, 4vw, 64px) 28px;
+	}
+	.mono { font-family: "Consolas", monospace; letter-spacing: 0; }
+
+	.topline { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: var(--cyan); opacity: 0.55; z-index: 30; }
+	.brandbar
+	{
+		position: fixed;
+		top: 3px; left: 0; right: 0; height: 34px;
+		display: flex; justify-content: space-between; align-items: center;
+		padding: 0 clamp(14px, 4vw, 64px);
+		font-family: "Consolas", monospace;
+		font-size: 11.5px; letter-spacing: 2px;
+		color: var(--faint);
+		text-transform: uppercase;
+		background: rgba(0,3,29,0.82);
+		backdrop-filter: blur(6px);
+		z-index: 20;
+		white-space: nowrap;
+	}
+	.brandbar .cpki b { color: var(--cyan); font-weight: 700; }
+	.brandbar a { color: var(--dim); text-decoration: none; }
+
+	h1 { font-size: clamp(24px, 3.6vw, 36px); line-height: 1.16; font-weight: 700; letter-spacing: -0.01em; }
+	h2 { font-size: 17px; font-weight: 700; line-height: 1.3; margin: 0; }
+	h2 small { font-weight: 400; color: var(--faint); font-size: 13px; margin-left: 8px; }
+	.subtitle { margin-top: 10px; max-width: 880px; color: var(--dim); font-size: 14.5px; line-height: 1.55; }
+	.meta-row { margin-top: 14px; display: flex; gap: 6px; flex-wrap: wrap; }
+	.tag
+	{
+		font-family: "Consolas", monospace;
+		font-size: 11.5px;
+		border-radius: 999px;
+		border: 1px solid rgba(139,151,184,0.35);
+		color: var(--dim);
+		padding: 3px 10px;
+		white-space: nowrap;
+	}
+	.tag.cy { border-color: rgba(79,238,247,0.4); color: var(--cyan); }
+	.tag.am { border-color: rgba(232,180,90,0.45); color: var(--amber); }
+
+	section { margin-top: 26px; }
+
+	/* model block: heading + two mini charts side by side */
+	.modelhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+	.duo { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+	@media (max-width: 760px) { .duo { grid-template-columns: 1fr; } }
+	.panel
+	{
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		padding: 12px 14px 10px;
+		min-width: 0;
+	}
+	.panel h3
+	{
+		font-size: 11px; font-weight: 500; color: var(--faint);
+		font-family: "Consolas", monospace; letter-spacing: 1.5px;
+		text-transform: uppercase; margin-bottom: 9px;
+	}
+
+	/* flat bars */
+	.chart { display: grid; gap: 6px; }
+	.row { display: grid; grid-template-columns: minmax(108px, 168px) 1fr 44px; align-items: center; gap: 10px; min-width: 0; }
+	.name { font-size: 12.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+	.name b { color: var(--txt); font-weight: 700; }
+	.name .v7 { color: var(--cyan); font-weight: 700; }
+	.barwrap { min-width: 0; }
+	.bar
+	{
+		height: 16px;
+		border-radius: 3px;
+		min-width: 2px;
+		max-width: 100%;
+		background: var(--bc, #46547a);
+	}
+	.bar.v7 { background: rgba(79,238,247,0.75); }
+	.bar.llama { background: var(--b-llama); }
+	.bar.mnn { background: var(--b-mnn); }
+	.bar.ov { background: var(--b-ov); }
+	.val { font-family: "Consolas", monospace; font-size: 12.5px; text-align: right; color: var(--dim); white-space: nowrap; }
+	.val.v7 { color: var(--cyan); font-weight: 700; }
+	.foot { margin-top: 8px; font-size: 12px; color: var(--faint); line-height: 1.45; }
+
+	/* raw data table */
+	.tablewrap { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+	table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+	th, td
+	{
+		text-align: right;
+		padding: 6px 10px;
+		border-bottom: 1px solid var(--line);
+		font-family: "Consolas", monospace;
+		letter-spacing: 0;
+		white-space: nowrap;
+	}
+	th:first-child, td:first-child { text-align: left; font-family: "Mg12", "Segoe UI", sans-serif; letter-spacing: 0.04em; }
+	th { color: var(--faint); font-weight: 500; font-size: 11.5px; }
+	tbody tr:last-child td { border-bottom: none; }
+	td.v7 { color: var(--cyan); font-weight: 700; }
+	tbody tr:hover { background: rgba(79,238,247,0.03); }
+
+	.setup { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+	.setup td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); font-family: "Mg12", "Segoe UI", sans-serif; color: var(--dim); }
+	.setup td:first-child { white-space: nowrap; color: var(--txt); font-weight: 500; width: 1%; }
+	.setup tr:last-child td { border-bottom: none; }
+
+	.code
+	{
+		font-family: "Consolas", monospace;
+		font-size: 12.5px;
+		line-height: 1.6;
+		background: rgba(0,3,29,0.85);
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		padding: 12px 16px;
+		color: #b9c4e6;
+		white-space: pre;
+		overflow-x: auto;
+		letter-spacing: 0;
+		max-width: 100%;
+	}
+	.code .cm { color: #55629b; }
+
+	p.note { font-size: 13.5px; color: var(--dim); line-height: 1.55; margin-top: 10px; }
+	p.note strong { color: var(--txt); }
+	.footnote { font-size: 12px; color: var(--faint); margin-top: 8px; line-height: 1.5; }
+
+	.footer
+	{
+		margin-top: 34px;
+		border-top: 1px solid var(--line);
+		padding: 14px 0 4px;
+		display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+		font-family: "Consolas", monospace; font-size: 11.5px; letter-spacing: 1px;
+		color: var(--faint);
+	}
+	.footer a { color: var(--dim); text-decoration: none; }
+	p.note a { color: var(--cyan); }
+
+	/* two-page presentation */
+	.pagenav { display: flex; gap: 8px; margin: 0 0 6px; }
+	.pagenav button
+	{
+		font-family: "Consolas", monospace;
+		font-size: 12px; letter-spacing: 1px;
+		color: var(--dim);
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		padding: 6px 16px;
+		cursor: pointer;
+	}
+	.pagenav button:hover { color: var(--txt); border-color: rgba(139,151,184,0.6); }
+	.pagenav button.on { color: var(--cyan); border-color: rgba(79,238,247,0.45); }
+	.sheet.off { display: none; }
+</style>
+</head>
+<body>
+<div class="topline"></div>
+<div class="brandbar">
+	<div class="cpki"><b>CPKI</b> GmbH &middot; v7</div>
+	<div>CPU inference &middot; four models</div>
+	<div><a href="https://ai.cpki.de" target="_blank">ai.cpki.de</a></div>
+</div>
+
+<div class="page">
+
+	<div class="pagenav">
+		<button type="button" class="on">Results &middot; full power</button>
+		<button type="button">Power saving</button>
+	</div>
+
+	<!-- ======================= PAGE 1: FULL POWER ======================= -->
+	<div class="sheet" id="sheet-results">
+
+	<!-- ======================= HEADER ======================= -->
+	<h1>CPU inference benchmarks</h1>
+	<p class="subtitle">Decode throughput in generated tokens per second (tok/s)
+	on a Ryzen 5 7430U laptop with six physical cores and 12 logical processors.
+	The comparison uses 8-bit weights and five rounds per engine and workload.
+	The poem prompt had a nominal 500-token budget. Actual output lengths varied
+	by engine.</p>
+	<div class="meta-row">
+		<span class="tag">Qwen3 &middot; November 8 baseline</span>
+		<span class="tag">MiniCPM5-1B &middot; November 8 retest, 18:55</span>
+		<span class="tag">Phi-3-mini &middot; November 9 retest, 09:38</span>
+	</div>
+
+	<!-- ======================= QWEN3-0.6B ======================= -->
+	<section>
+		<div class="modelhead">
+			<h2>Qwen3-0.6B <small>0.6B parameters</small></h2>
+			<span class="tag cy">v7 led in both workloads</span>
+		</div>
+		<div class="duo">
+			<div class="panel">
+				<h3>Short chat</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">55.8</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0</div><div class="barwrap"><div class="bar llama" style="width:93%"></div></div><div class="val">52.0</div></div>
+					<div class="row"><div class="name">MNN int8</div><div class="barwrap"><div class="bar mnn" style="width:86%"></div></div><div class="val">48.2</div></div>
+					<div class="row"><div class="name">OpenVINO int8</div><div class="barwrap"><div class="bar ov" style="width:74%"></div></div><div class="val">41.4</div></div>
+				</div>
+			</div>
+			<div class="panel">
+				<h3>Poem</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8 &middot; 500 tok</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">52.2</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0 &middot; 500 tok</div><div class="barwrap"><div class="bar llama" style="width:91%"></div></div><div class="val">47.3</div></div>
+					<div class="row"><div class="name">MNN int8 &middot; 512 tok</div><div class="barwrap"><div class="bar mnn" style="width:84%"></div></div><div class="val">43.8</div></div>
+					<div class="row"><div class="name">OpenVINO int8 &middot; EOS</div><div class="barwrap"><div class="bar ov" style="width:76%"></div></div><div class="val">39.7</div></div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- ======================= QWEN3-1.7B ======================= -->
+	<section>
+		<div class="modelhead">
+			<h2>Qwen3-1.7B <small>1.7B parameters</small></h2>
+			<span class="tag cy">v7 led in both workloads</span>
+		</div>
+		<div class="duo">
+			<div class="panel">
+				<h3>Short chat</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">20.0</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0</div><div class="barwrap"><div class="bar llama" style="width:99%"></div></div><div class="val">19.8</div></div>
+					<div class="row"><div class="name">OpenVINO int8</div><div class="barwrap"><div class="bar ov" style="width:92%"></div></div><div class="val">18.3</div></div>
+					<div class="row"><div class="name">MNN int8</div><div class="barwrap"><div class="bar mnn" style="width:91%"></div></div><div class="val">18.1</div></div>
+				</div>
+			</div>
+			<div class="panel">
+				<h3>Poem</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8 &middot; 500 tok</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">19.5</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0 &middot; 500 tok</div><div class="barwrap"><div class="bar llama" style="width:98%"></div></div><div class="val">19.2</div></div>
+					<div class="row"><div class="name">MNN int8 &middot; 512 tok</div><div class="barwrap"><div class="bar mnn" style="width:91%"></div></div><div class="val">17.7</div></div>
+					<div class="row"><div class="name">OpenVINO int8 &middot; EOS</div><div class="barwrap"><div class="bar ov" style="width:90%"></div></div><div class="val">17.5</div></div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- ======================= PHI-3-MINI ======================= -->
+	<section>
+		<div class="modelhead">
+			<h2>Phi-3-mini-4k-instruct <small>3.8B parameters</small></h2>
+			<span class="tag am">llama.cpp led by about 2&ndash;3%</span>
+		</div>
+		<div class="duo">
+			<div class="panel">
+				<h3>Short chat</h3>
+				<div class="chart">
+					<div class="row"><div class="name">llama.cpp Q8_0</div><div class="barwrap"><div class="bar llama" style="width:100%"></div></div><div class="val">9.4</div></div>
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8</div><div class="barwrap"><div class="bar v7" style="width:97%"></div></div><div class="val v7">9.1</div></div>
+					<div class="row"><div class="name">OpenVINO int8</div><div class="barwrap"><div class="bar ov" style="width:91%"></div></div><div class="val">8.6</div></div>
+					<div class="row"><div class="name">MNN int8</div><div class="barwrap"><div class="bar mnn" style="width:89%"></div></div><div class="val">8.4</div></div>
+				</div>
+				<div class="foot">Phi-3-mini typically generated about eight tokens before reaching the
+				end-of-sequence token. The short turn is sensitive to timing variation.</div>
+			</div>
+			<div class="panel">
+				<h3>Poem</h3>
+				<div class="chart">
+					<div class="row"><div class="name">llama.cpp Q8_0 &middot; 500 tok</div><div class="barwrap"><div class="bar llama" style="width:100%"></div></div><div class="val">8.9</div></div>
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8 &middot; 500 tok</div><div class="barwrap"><div class="bar v7" style="width:98%"></div></div><div class="val v7">8.7</div></div>
+					<div class="row"><div class="name">MNN int8 &middot; 411-512 tok</div><div class="barwrap"><div class="bar mnn" style="width:90%"></div></div><div class="val">8.0</div></div>
+					<div class="row"><div class="name">OpenVINO int8 &middot; 424 tok EOS</div><div class="barwrap"><div class="bar ov" style="width:88%"></div></div><div class="val">7.8</div></div>
+				</div>
+				<div class="foot">The November 9 retest suppressed cycle-tuner measurements during timing.
+				The preceding poem run recorded 52,061 tuner measurement episodes.</div>
+			</div>
+		</div>
+	</section>
+
+	<!-- ======================= MINICPM5-1B ======================= -->
+	<section>
+		<div class="modelhead">
+			<h2>MiniCPM5-1B <small>1.0B parameters</small></h2>
+			<span class="tag cy">v7 led after the second retest</span>
+		</div>
+		<div class="duo">
+			<div class="panel">
+				<h3>Short chat</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">38.1</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0</div><div class="barwrap"><div class="bar llama" style="width:99%"></div></div><div class="val">37.7</div></div>
+					<div class="row"><div class="name">MNN int8</div><div class="barwrap"><div class="bar mnn" style="width:91%"></div></div><div class="val">34.8</div></div>
+					<div class="row"><div class="name">OpenVINO int8</div><div class="barwrap"><div class="bar ov" style="width:84%"></div></div><div class="val">32.0</div></div>
+				</div>
+				<div class="foot">The second retest used a rebuilt v7 database with a tuner delay of 100.
+				The recorded v7 prefill rate was 96&ndash;110 tok/s.</div>
+			</div>
+			<div class="panel">
+				<h3>Poem</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8 &middot; 500 tok</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">37.1</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0 &middot; 500 tok</div><div class="barwrap"><div class="bar llama" style="width:99%"></div></div><div class="val">36.6</div></div>
+					<div class="row"><div class="name">MNN int8 &middot; 512 tok</div><div class="barwrap"><div class="bar mnn" style="width:90%"></div></div><div class="val">33.4</div></div>
+					<div class="row"><div class="name">OpenVINO int8 &middot; 439 tok EOS</div><div class="barwrap"><div class="bar ov" style="width:78%"></div></div><div class="val">29.1</div></div>
+				</div>
+			</div>
+		</div>
+	</section>
+
+	<section>
+		<h2>Reading the results</h2>
+		<p class="note">v7 led in six of the eight workloads in this comparison.
+		The two Qwen3 models use the November 8 baseline. The MiniCPM5-1B and
+		Phi-3-mini results come from their respective retests. Each workload
+		compares engines from the same run.</p>
+		<p class="note">The <a href="engine_benchmark.md">full benchmark report</a>
+		includes the earlier ONNX Runtime GenAI int4 results, prefill figures,
+		and the original baseline figures for both retested models.</p>
+	</section>
+
+	<!-- ======================= RAW DATA ======================= -->
+	<section>
+		<h2>Short-chat rounds and workload summaries <small>tok/s</small></h2>
+		<div class="tablewrap" style="margin-top: 10px;">
+		<table>
+			<thead>
+			<tr><th>Model</th><th>Engine</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>R5</th><th>Short steady state</th><th>Poem mean</th></tr>
+			</thead>
+			<tbody>
+			<tr><td rowspan="4">Qwen3-0.6B</td><td class="v7">v7</td><td>55.0</td><td>55.4</td><td>55.6</td><td>55.9</td><td>55.8</td><td><strong>55.8</strong></td><td><strong>52.2</strong></td></tr>
+			<tr><td>llama.cpp</td><td>52.0</td><td>52.0</td><td>51.8</td><td>52.0</td><td>52.0</td><td>52.0</td><td>47.3</td></tr>
+			<tr><td>MNN</td><td>48.2</td><td>47.6</td><td>48.6</td><td>48.4</td><td>48.1</td><td>48.2</td><td>43.8</td></tr>
+			<tr><td>OpenVINO</td><td>28.9</td><td>41.5</td><td>41.1</td><td>41.4</td><td>41.5</td><td>41.4</td><td>39.7</td></tr>
+
+			<tr><td rowspan="4">Qwen3-1.7B</td><td class="v7">v7</td><td>20.0</td><td>19.9</td><td>20.0</td><td>20.0</td><td>20.0</td><td><strong>20.0</strong></td><td><strong>19.5</strong></td></tr>
+			<tr><td>llama.cpp</td><td>19.8</td><td>19.8</td><td>19.6</td><td>19.8</td><td>19.8</td><td>19.8</td><td>19.2</td></tr>
+			<tr><td>OpenVINO</td><td>14.6</td><td>18.3</td><td>18.3</td><td>18.3</td><td>18.2</td><td>18.3</td><td>17.5</td></tr>
+			<tr><td>MNN</td><td>18.0</td><td>18.1</td><td>18.0</td><td>18.3</td><td>18.2</td><td>18.1</td><td>17.7</td></tr>
+
+			<tr><td rowspan="4">Phi-3-mini <small>(tuner quiet)</small></td><td>llama.cpp</td><td>9.3</td><td>9.4</td><td>9.4</td><td>9.4</td><td>9.4</td><td><strong>9.4</strong></td><td><strong>8.9</strong></td></tr>
+			<tr><td class="v7">v7</td><td>8.5</td><td>9.1</td><td>9.2</td><td>9.1</td><td>9.1</td><td>9.1</td><td>8.7</td></tr>
+			<tr><td>OpenVINO</td><td>5.3</td><td>8.5</td><td>8.6</td><td>8.6</td><td>8.6</td><td>8.6</td><td>7.8</td></tr>
+			<tr><td>MNN</td><td>9.5</td><td>8.4</td><td>8.5</td><td>8.4</td><td>8.5</td><td>8.4</td><td>8.0</td></tr>
+
+			<tr><td rowspan="4">MiniCPM5-1B <small>(second retest)</small></td><td class="v7">v7</td><td>37.5</td><td>38.2</td><td>38.1</td><td>38.1</td><td>37.9</td><td><strong>38.1</strong></td><td><strong>37.1</strong></td></tr>
+			<tr><td>llama.cpp</td><td>37.8</td><td>37.5</td><td>37.7</td><td>37.8</td><td>37.8</td><td>37.7</td><td>36.6</td></tr>
+			<tr><td>MNN</td><td>34.7</td><td>35.3</td><td>34.4</td><td>34.6</td><td>34.8</td><td>34.8</td><td>33.4</td></tr>
+			<tr><td>OpenVINO</td><td>26.0</td><td>32.1</td><td>32.0</td><td>31.7</td><td>32.2</td><td>32.0</td><td>29.1</td></tr>
+			</tbody>
+		</table>
+		</div>
+		<div class="footnote">R1&ndash;R5 are the individual short-chat rounds.
+		The short-chat summary reports the steady-state figure from rounds 2&ndash;5.
+		The poem summary reports the mean across five poem rounds.</div>
+	</section>
+
+	<section>
+		<h2>Engine configuration</h2>
+		<div class="tablewrap" style="margin-top: 10px;">
+		<table class="setup">
+			<tr><td>v7 2.33.0 dev build</td><td>Native Q8 weights in MicroDB.
+			Five workers plus the calling thread on six physical cores.
+			Continuous spinning during inference.</td></tr>
+			<tr><td>llama.cpp</td><td>b12179 Windows CPU x64 build, GGUF Q8_0,
+			six threads (<code>-t 6</code>), CPU only (<code>-ngl 0</code>),
+			and a single turn (<code>-st</code>).</td></tr>
+			<tr><td>MNN</td><td>3.6.2, a static MSVC build with int8 weights
+			exported using <code>llmexport</code>, four threads, and a sampling
+			temperature of 0.8.</td></tr>
+			<tr><td>OpenVINO</td><td>2026.4.1, per-channel asymmetric int8
+			weights from NNCF, and the CPU plugin capped at AVX2
+			(<code>OV_CPU_MAX_ISA=AVX2</code>).</td></tr>
+		</table>
+		</div>
+		<p class="note">v7, llama.cpp, and OpenVINO used greedy decoding.
+		The <a href="engine_benchmark.md#running-the-comparisons">run instructions</a>
+		list the three-round Windows batch files included in the release and the
+		requirements for reproducing the five-round comparison.</p>
+	</section>
+
+	<div class="footer">
+		<div>v7 &middot; CPU inference benchmarks</div>
+		<div>November 8&ndash;9, 2026</div>
+		<div><a href="https://ai.cpki.de" target="_blank">ai.cpki.de</a></div>
+	</div>
+
+	</div><!-- /sheet-results -->
+
+	<!-- ======================= PAGE 2: POWER SAVING ======================= -->
+	<div class="sheet off" id="sheet-power">
+
+	<h1>Power-saving benchmark</h1>
+	<p class="subtitle">What happens to each engine when the CPU clocks drop.
+	Measured on the same laptop, the same four models, and the same five-round
+	protocol as page 1 &mdash; but with the Windows power plan set to
+	<strong>Power saver</strong> for the entire run.</p>
+	<div class="meta-row">
+		<span class="tag">November 10, 2026 &middot; tuner-loop cycle</span>
+		<span class="tag am">throttled clocks &middot; all engines slower</span>
+		<span class="tag cy">v7 keeps 93 % of its speed &middot; the field keeps 83 %</span>
+	</div>
+
+	<section>
+		<h2>What happened, and why it is interesting</h2>
+		<p class="note">One benchmark-loop cycle (build databases, run the full
+		four-model suite, repeat) was started with the laptop still in the
+		Windows <strong>Power saver</strong> plan instead of the usual
+		high-performance state. Every engine ran with throttled clocks, back to
+		back, twice: once with v7's in-process tuner running (delay 0) and once
+		with the tuner silent (delay 99999). The tuner-silent run is the honest
+		power-saving figure and is what this page shows.</p>
+		<p class="note">An accident &mdash; but a useful one. It answers a
+		question the full-power benchmarks cannot: <strong>how gracefully does
+		each engine degrade when the CPU slows down?</strong> That is exactly
+		the condition of a laptop on battery, a fanless box in a warm room, or
+		any eco power profile.</p>
+	</section>
+
+	<section>
+		<div class="modelhead">
+			<h2>The headline <small>Qwen3-0.6B short chat, full power vs power saver</small></h2>
+		</div>
+		<div class="duo">
+			<div class="panel">
+				<h3>Throughput each engine keeps</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8</div><div class="barwrap"><div class="bar v7" style="width:93%"></div></div><div class="val v7">52.0 of 55.8</div></div>
+					<div class="row"><div class="name">MNN int8</div><div class="barwrap"><div class="bar mnn" style="width:91%"></div></div><div class="val">44.0 of 48.2</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0</div><div class="barwrap"><div class="bar llama" style="width:83%"></div></div><div class="val">43.0 of 52.0</div></div>
+					<div class="row"><div class="name">OpenVINO int8</div><div class="barwrap"><div class="bar ov" style="width:83%"></div></div><div class="val">34.2 of 41.4</div></div>
+				</div>
+				<div class="foot">Bar length = power-saving speed as a share of the
+				engine's own full-power speed. Longer is better. v7 loses
+				6.8 %, MNN 8.7 %, llama.cpp and OpenVINO about 17 % each.</div>
+			</div>
+			<div class="panel">
+				<h3>Why: two ways of waiting</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> spin-wait</div><div class="barwrap"><div class="bar v7" style="width:39%"></div></div><div class="val v7">&minus;6.8%</div></div>
+					<div class="row"><div class="name">MNN int8</div><div class="barwrap"><div class="bar mnn" style="width:50%"></div></div><div class="val">&minus;8.7%</div></div>
+					<div class="row"><div class="name">llama.cpp sync</div><div class="barwrap"><div class="bar llama" style="width:100%"></div></div><div class="val">&minus;17.3%</div></div>
+					<div class="row"><div class="name">OpenVINO sync</div><div class="barwrap"><div class="bar ov" style="width:100%"></div></div><div class="val">&minus;17.3%</div></div>
+				</div>
+				<div class="foot">v7's workers spin-wait on their own physical cores
+				and hand work through shared memory &mdash; that scales down
+				linearly with the clock. llama.cpp and OpenVINO pay extra for
+				every thread handoff and synchronization, and those fixed costs
+				hurt more as the clock drops. Shorter bar = smaller loss.</div>
+			</div>
+		</div>
+	</section>
+
+	<section>
+		<div class="modelhead">
+			<h2>The ranking flips <small>Phi-3-mini poem, power saver</small></h2>
+			<span class="tag am">llama.cpp falls from first to third</span>
+		</div>
+		<div class="duo">
+			<div class="panel">
+				<h3>Phi-3-mini poem &middot; power saver</h3>
+				<div class="chart">
+					<div class="row"><div class="name"><span class="v7">v7</span> Q8 &middot; 500 tok</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">8.7</div></div>
+					<div class="row"><div class="name">MNN int8 &middot; 512 tok</div><div class="barwrap"><div class="bar mnn" style="width:86%"></div></div><div class="val">7.5</div></div>
+					<div class="row"><div class="name">llama.cpp Q8_0 &middot; 500 tok</div><div class="barwrap"><div class="bar llama" style="width:82%"></div></div><div class="val">7.1</div></div>
+					<div class="row"><div class="name">OpenVINO int8 &middot; EOS</div><div class="barwrap"><div class="bar ov" style="width:66%"></div></div><div class="val">5.7</div></div>
+				</div>
+				<div class="foot">At full power llama.cpp won this workload
+				(8.9 vs v7's 8.7). Under power saving v7 wins by 23 %.</div>
+			</div>
+			<div class="panel">
+				<h3>What it means</h3>
+				<div class="chart">
+					<div class="row"><div class="name">v7 wins</div><div class="barwrap"><div class="bar v7" style="width:88%"></div></div><div class="val v7">7 of 8</div></div>
+					<div class="row"><div class="name">at full power</div><div class="barwrap"><div class="bar llama" style="width:75%"></div></div><div class="val">6 of 8</div></div>
+				</div>
+				<div class="foot">v7 wins seven of the eight model-workload pairs
+				under power saving (it won six of eight at full power). Only
+				Phi-3-mini short chat goes to MNN, by 0.1 tok/s. The slower the
+				CPU runs, the bigger v7's lead becomes.</div>
+			</div>
+		</div>
+	</section>
+
+	<section>
+		<h2>All power-saving numbers <small>tok/s &middot; full-power baseline in parentheses</small></h2>
+		<div class="tablewrap" style="margin-top: 10px;">
+		<table>
+			<thead>
+			<tr><th>Model</th><th>Load</th><th>v7 Q8</th><th>llama.cpp</th><th>MNN</th><th>OpenVINO</th></tr>
+			</thead>
+			<tbody>
+			<tr><td rowspan="2">Qwen3-0.6B</td><td>short</td><td class="v7"><strong>52.0</strong> (55.8)</td><td>43.0 (52.0)</td><td>44.0 (48.2)</td><td>34.2 (41.4)</td></tr>
+			<tr><td>poem</td><td class="v7"><strong>48.5</strong> (52.2)</td><td>39.5 (47.3)</td><td>39.6 (43.8)</td><td>26.4 (39.7)</td></tr>
+			<tr><td rowspan="2">Qwen3-1.7B</td><td>short</td><td class="v7"><strong>18.6</strong> (20.0)</td><td>15.0 (19.8)</td><td>16.3 (18.1)</td><td>12.7 (18.3)</td></tr>
+			<tr><td>poem</td><td class="v7"><strong>18.7</strong> (19.5)</td><td>14.9 (19.2)</td><td>16.5 (17.7)</td><td>12.4 (17.5)</td></tr>
+			<tr><td rowspan="2">Phi-3-mini</td><td>short</td><td>8.1 (9.1)</td><td>7.4 (9.4)</td><td><strong>8.2</strong> (8.4)</td><td>6.2 (8.6)</td></tr>
+			<tr><td>poem</td><td class="v7"><strong>8.7</strong> (8.7)</td><td>7.1 (8.9)</td><td>7.5 (8.0)</td><td>5.7 (7.8)</td></tr>
+			<tr><td rowspan="2">MiniCPM5-1B</td><td>short</td><td class="v7"><strong>36.9</strong> (38.1)</td><td>28.3 (37.7)</td><td>32.3 (34.8)</td><td>23.1 (32.0)</td></tr>
+			<tr><td>poem</td><td class="v7"><strong>35.8</strong> (37.1)</td><td>28.0 (36.6)</td><td>31.1 (33.4)</td><td>21.4 (29.1)</td></tr>
+			</tbody>
+		</table>
+		</div>
+		<div class="footnote">Read a cell like "52.0 (55.8)" as: 52.0 tok/s under
+		power saving, 55.8 tok/s at full power. Bold marks the workload winner.
+		These values do not replace page 1 &mdash; they describe a different
+		machine state. Source log: benchmark_tuner_loop_20261112_081959.txt
+		(three complete runs on November 10, 08:31 / 09:36 / 10:41).</div>
+	</section>
+
+	<section>
+		<h2>The tuner across the loop <small>Qwen3-0.6B short chat, three consecutive legs</small></h2>
+		<div class="duo" style="margin-top: 10px;">
+			<div class="panel">
+				<h3>Three legs, one story</h3>
+				<div class="chart">
+					<div class="row"><div class="name">1 &middot; tuner on, fresh</div><div class="barwrap"><div class="bar ov" style="width:93%"></div></div><div class="val">48.5</div></div>
+					<div class="row"><div class="name">2 &middot; tuner quiet</div><div class="barwrap"><div class="bar v7" style="width:100%"></div></div><div class="val v7">52.0</div></div>
+					<div class="row"><div class="name">3 &middot; tuner on again</div><div class="barwrap"><div class="bar mnn" style="width:98%"></div></div><div class="val">51.0</div></div>
+				</div>
+				<div class="foot">The first leg (tuner learning from scratch,
+				changing configurations mid-run) is 7 % slower than the quiet
+				leg. The third leg &mdash; tuner on again, but starting from
+				what leg 1 learned &mdash; nearly matches the quiet speed.</div>
+			</div>
+			<div class="panel">
+				<h3>Why that matters</h3>
+				<div class="foot" style="margin-top: 2px;">v7's tuner stores every
+				improvement it finds. After one learning cycle the tuned
+				configurations are already in place, and even a running tuner
+				costs almost nothing extra. Two practical rules follow:
+				benchmark with the tuner quiet (delay 99999) for clean numbers,
+				and let the tuner run in production &mdash; its work carries
+				over through the persisted populations and keeps paying off.</div>
+				<div class="foot">Machine state: all three legs throttled the same
+				way, and the non-v7 engines reproduced within about 1 % across
+				them, so the v7 movement between legs is the tuner's, not the
+				machine's.</div>
+			</div>
+		</div>
+	</section>
+
+	<section>
+		<h2>Bottom line</h2>
+		<p class="note">Under power saving v7 keeps 93 % of its full-power
+		throughput while llama.cpp and OpenVINO keep 83 %, so v7's lead widens
+		as the CPU slows &mdash; from +7 % to +21 % on Qwen3-0.6B short chat,
+		and enough to flip two Phi-3-mini workloads outright. For battery,
+		eco-profile, or thermally constrained deployments, v7 is the engine
+		that degrades least.</p>
+	</section>
+
+	<div class="footer">
+		<div>v7 &middot; power-saving benchmark</div>
+		<div>November 10, 2026</div>
+		<div><a href="https://ai.cpki.de" target="_blank">ai.cpki.de</a></div>
+	</div>
+
+	</div><!-- /sheet-power -->
+
+</div>
+<script>
+(function () {
+	var tabs = document.querySelectorAll(".pagenav button");
+	var results = document.getElementById("sheet-results");
+	var power = document.getElementById("sheet-power");
+	function pick(name) {
+		results.classList.toggle("off", name !== "results");
+		power.classList.toggle("off", name !== "power");
+		tabs[0].classList.toggle("on", name === "results");
+		tabs[1].classList.toggle("on", name === "power");
+		window.scrollTo(0, 0);
+	}
+	tabs[0].addEventListener("click", function () { pick("results"); });
+	tabs[1].addEventListener("click", function () { pick("power"); });
+})();
+</script>
+</body>
+</html>

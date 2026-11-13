@@ -1,0 +1,11 @@
+; p04_noop.logo -- P0-4 CONTROL sidecar for the rewrite-cost micro-measurement.
+; Detects the close-think piece, prints a banner, and performs NO rewrite
+; (no SetStream). The generation phase therefore runs exactly as an unhooked
+; turn would after the trigger, giving the baseline the append treatment is
+; compared against. The close-think literal is built with the split-form
+; concat trick because a whole-tag literal can be eaten by tooling.
+
+Make "closetag" "</thi" _ "nk>" ; close-think tag via split-form concat
+IfElse (:PIECE = :closetag) [ ; only act on the close-think piece
+  PrintBanner "P04-NOOP: close-think seen, no rewrite performed" ; baseline: no SetStream
+] []

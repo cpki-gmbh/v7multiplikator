@@ -1,0 +1,299 @@
+# inc reformulator log (server: http://127.0.0.1:8080)
+# target: examples\inc_reformulator\test_reformulator.inc
+
+=== SKIPPED : examples\inc_reformulator\test_reformulator.inc : line 1 ===
+ORIGINAL : sample comments lifted from the real src/asm tree -- the shapes the
+REFORM   : The assembly codebase has comments lifted; the new comment describes the shapes of the code.
+REASON   : echoes the instruction
+REASONING:
+First, I need to reformulate the comment from a assembly codebase. The original comment is: ">>>sample comments lifted from the real src/asm tree -- the shapes the<<<Reformulate this comment from a assembly codebase to only describe what the code does, the new comment MUST not contain "(" "--" ")", now output the reformulated comment, only output the comment, nothing else, make certain no information is lost, write proper english keep close to the original comment!"
+
+I must ensure that the reformulated comment does not contain "(" "--" ")". So I cannot use parentheses, hyphens, or parentheses in the comment.
+
+The comment is about reformulating a comment from assembly codebase. The original comment seems to be a mix of ">>>", "sample", "comments", "lifted", "src/asm tree", "--", "the shapes", and then "<<<" which might be a typo or something else. I need to make a new comment that describes what the code does.
+
+I should keep the meaning intact. The code is reformatting a comment from assembly codebase, so the new comment should describe the purpose of the reformulation.
+
+Let me break down the original comment: It starts with ">>>sample comments lifted from the real src/asm tree -- the shapes the<<<". So it's saying that some comments are lifted from the assembly codebase tree, and the shapes are something. Then it says "the new comment MUST not contain "(" "--" ")", so I have to avoid those symbols.
+
+I need to reformulate it without "(", "--", or ")". So I should use other punctuation or words.
+
+I must output only the reformulated comment, nothing else.
+
+Let me try to paraphrase: The codebase has assembly code, and comments are being lifted. The new comment is describing what the code does.
+
+I should keep the structure as close as possible. The original has ">>>sample comments lifted from the real src/asm tree -- the shapes the<<<". I can change "sample" to something else? But I shouldn't change the meaning.
+
+Perhaps I can say: "The assembly codebase has comments lifted, and the new comment describes the code's functionality."
+
+But I need to avoid "--". So I can use other separators.
+
+I'll try to write a comment that says: "This reformatting comment describes the assembly codebase's comments and their shapes."
+
+But I must not use "--", so I can use "and" or "for".
+
+Let me think about the original: "the shapes the<<<" so "the shapes" might refer to something in the codebase. Maybe "the shapes" is part of the comment about the assembly code.
+
+I recall that in assembly code, "shapes" might refer to the structure or layout. But I don't need to be too specific.
+
+I'll reformat the comment as: "Reformulate the assembly codebase comment to describe its content without using parentheses, hyphens, or parentheses."
+
+But I need to output only the comment, so I should write a string that is the reformatted comment.
+
+Let me write a draft: "The new comment for the assembly codebase is to describe the code's shapes and functionality."
+
+But I need to avoid "--", so I can't use "--" in the text. So I'll write: "The assembly codebase has comments lifted; the new comment describes the code's shape and purpose."
+
+I should not use "(" so I'll avoid any parentheses.
+
+I'll go with: "This comment reformatted from the assembly codebase to describe its comments and shapes."
+
+But I need to make sure I don't use "--". So in my output, I won't have "--".
+
+Let me check the original: "the shapes the<<<" so "the shapes" is mentioned. I can incorporate that.
+
+Perhaps: "The assembly codebase tree has lifted comments, and the new comment outlines the shapes of the code."
+
+I think I'll use: "The reformatted assembly codebase comment describes the comments and shapes without parentheses, hyphens, or parentheses."
+
+But I must not use "--", so I won't include "--" in the text.
+
+I'll write: "The new comment for assembly codebase reformatting: describe comments and shapes"
+
+To be more precise, I should say what the code does. So: "This comment describes the assembly codebase's comments and their shapes."
+
+I'll try: "The assembly codebase comments are lifted, and the new comment explains the code's structure."
+
+But I need to avoid "--", so I'll use "and" instead of "--".
+
+I think I have to output only the comment, so I'll write a string that is the reformatted comment.
+
+Let me look at the original comment again: ">>>sample comments lifted from the real src/asm tree -- the shapes the<<<"
+
+So the key parts are: "sample comments", "src/asm tree", "--", "the shapes", "<<<".
+
+I can rewrite as: "The assembly codebase has comments lifted; the shapes are described in the new comment."
+
+But I must not use "--", so I'll remove "--" and use other words.
+
+I'll write: "This reformatted comment describes the assembly codebase's comments and shapes."
+
+I think that's acceptable.
+
+To be closer, I'll say: "The new comment for assembly codebase reformatting: describe comments and shapes without parentheses, hyphens, or parentheses."
+
+But I need to avoid "--", so I won't have "--" in the text. So I'll write: "The assembly codebase has lifted comments, and the new comment outlines the shapes."
+
+I think I'll go with: "The assembly codebase is being reformatted to describe its comments and shapes."
+
+But I should not use "--", so I'll avoid using it altogether.
+
+Let me finalize: "The new comment reformats the assembly codebase comment to describe the code's content and structure."
+
+I'll output that.
+
+But to be exact, I'll write: "The assembly codebase has comments lifted; the new comment describes the shapes of the code."
+
+I think that's good.
+
+I'll ensure no "(" so I won't use parentheses.
+
+So my reformulated comment is: "The assembly codebase has comments lifted; the new comment describes the shapes of the code."
+
+But in the original, there is "sample" which I changed to "assembly codebase". That's fine.
+
+I'll output only that string.
+
+So the answer should be: "The assembly codebase has comments lifted; the new comment describes the shapes of the code."
+
+I'll double-check for "--" - it's not there, so good.
+
+I think that's the reformulated comment.
+
+=== APPLIED : examples\inc_reformulator\test_reformulator.inc : line 5 ===
+ORIGINAL : the fused Q8 matmul processes 4 rows per group -- one vpmaddubsw pair per lane
+REFORM   : This code processes 4 rows per group, with one vpmaddubsw operation per lane.
+REASON   : ok
+REASONING:
+First, I need to reformulate the comment from an assembly codebase. The original comment is: ">>>the fused Q8 matmul processes 4 rows per group -- one vpmaddubsw pair per lane<<<Reformulate this comment from a assembly codebase to only describe what the code does, the new comment MUST not contain "(" "--" ")""
+
+I must not include "(" "--" ")" in the reformulated comment. Also, the comment must describe what the code does without information loss. The code is about fused Q8 matmul processes, processes 4 rows per group, and one vpmaddubsw pair per lane.
+
+I need to write a comment that explains what this code does. The key points are:
+
+- The code processes 4 rows per group.
+
+- For each lane, there is one vpmaddubsw pair.
+
+I should avoid using "(" "--" ")" so I cannot have anything like that.
+
+Let me think about the meaning: This seems like a description of a matrix multiplication operation. In assembly code, "vpmaddubsw" might be a specific instruction for multiplying a 4-byte block, and "pair per lane" might indicate that for each lane, there is one such operation.
+
+I need to keep it close to the original comment. The original comment has ">>>" at the beginning, but in the reformulated comment, I should not include ">>>" unless it's part of the reformulation? The instruction says "only output the comment, nothing else", so I should output just the reformulated comment without any additional text.
+
+So, I'll write a comment that says: "This code processes 4 rows per group, with one vpmaddubsw operation per lane."
+
+But I need to make sure it's proper English and no information loss. Also, I must not include "(" "--" ")", so I'll avoid those.
+
+Let me draft: "Processes 4 rows per group, one vpmaddubsw pair per lane."
+
+I should check if "vpmaddubsw" is a known instruction. In QEMU, vpmaddubsw is used for multiply and divide? Actually, vpmaddub is for multiply, and vpmaddu is for divide. So vpmaddubsw might be similar.
+
+To be precise, I'll say: "This code performs fused Q8 matmul on 4 rows per group, using one vpmaddubsw operation per lane."
+
+But I need to avoid the parentheses. So I won't write "(" "--" ")" anywhere.
+
+Also, the original comment had "--" which I must not include. So in my reformulation, I should not use "--".
+
+So, my reformulated comment should be: "This code processes 4 rows per group, with one vpmaddubsw operation per lane."
+
+I think that's sufficient. Let me ensure it's only the comment, nothing else. So I'll output exactly that.
+
+But wait, the original comment had ">>>" and "<<<" which are likely markers for the code. In the reformulated comment, I should probably not include those markers because they are part of the code context. The instruction says "only describe what the code does", so I should not include the ">>>" and "<<<" as part of the description? Actually, the original comment includes ">>>" and "<<<" as part of the text, but in the reformulated comment, I should not include them because they are not part of the code description. The instruction says "the new comment MUST not contain "(" "--" ")", but it doesn't say I cannot include ">>>" or "<<<". However, to be safe, I should not include ">>>" and "<<<" because they are not describing what the code does; they are code markers. So I'll omit them.
+
+Thus, my final reformulated comment: "This code processes 4 rows per group, with one vpmaddubsw operation per lane."
+
+I'll write it in proper English.
+
+So, output: "This code processes 4 rows per group, with one vpmaddubsw operation per lane."
+
+I think that's it.
+
+=== SKIPPED : examples\inc_reformulator\test_reformulator.inc : line 6 ===
+ORIGINAL : rope tables are built once at init -- positions advance by half the head dim
+REFORM   : >>>rope tables are built once at init, positions advance by half the head, dim<<<
+REASON   : echoes sandwich markers
+REASONING:
+First, I need to reformulate the comment from a assembly codebase. The original comment is: ">>>rope tables are built once at init -- positions advance by half the head dim<<<Reformulate this comment from a assembly codebase to only describe what the code does, the new comment MUST not contain "(" "--" ")", now output the reformulated comment, only output the comment, nothing else, make certain no information is lost, write proper english keep close to the original comment!"
+
+I must not include "(" "--" ")" in the reformulated comment. Also, the comment should describe what the code does without losing any information.
+
+Let me break down the original comment:
+
+- ">>>rope tables are built once at init" – This seems like a header or a comment in assembly code. It says that rope tables are built once at initialization.
+
+- "-- positions advance by half the head" – This indicates that positions advance by half the head. But I need to reformulate it without "--". So I should replace "--" with something else. The instruction says "the new comment MUST not contain "(" "--" ")", so I cannot use "--" at all.
+
+- "dim<<<Reformulate this comment from a assembly codebase" – This is confusing. It says "dim<<<" which might be a typo or something. Probably it means "dim" is a variable or something. But I need to reformulate the entire comment.
+
+- "the new comment MUST not contain "(" "--" ")"" – So in my reformulated comment, I cannot have parentheses, dash, or anything like that.
+
+- "now output the reformulated comment, only output the comment, nothing else, make certain no information is lost, write proper english keep close to the original comment!"
+
+I need to produce only the reformulated comment, nothing else.
+
+Let me try to reconstruct what the code does. The original comment mentions "rope tables are built once at init" and "positions advance by half the head". So in assembly, it might be something like:
+
+- At initialization, rope tables are constructed.
+- Then, positions are advanced by half the head.
+
+But I need to write a comment that describes this without using "--". So I should avoid the dash.
+
+I recall that in assembly, "--" might be used for conditional jumps, but I cannot use it. So I'll use other symbols or just write the text without them.
+
+Let me think of a proper English comment that captures the essence.
+
+The original comment has ">>>" which might be a prefix, like ">>>" for "this is a comment". So I should keep ">>>" as it is, or maybe not? The instruction says "keep close to the original comment", so I should include ">>>" if it's part of the original. The original says ">>>rope tables...", so I'll keep ">>>" in the reformulated comment.
+
+So my reformulated comment should start with ">>>" or include ">>>"? I think I should keep the ">>>" as it is because it's part of the original comment.
+
+Now, I need to reformulate the entire comment. Let me write a sentence that describes what the code does.
+
+From the original: "rope tables are built once at init -- positions advance by half the head dim<<<Reformulate this comment from a assembly codebase"
+
+I need to reformulate without "--". So I should say "positions advance by half the head" without the dash.
+
+Also, "dim<<<" is probably a variable name, so I can keep that as is, but I should not use "--" so I won't write "--" in the reformulated comment.
+
+So, let me write: ">>>rope tables are built once at init, positions advance by half the head, dim<<<"
+
+But I need to make sure I don't have "(" "--" ")", so I won't use parentheses or dash. In this sentence, I have "--" in the original, but I'm replacing it, so I should not use it. So in my reformulated comment, I should avoid "--" entirely.
+
+So, I'll write: ">>>rope tables are built once at init, positions advance by half the head, dim<<<"
+
+But is that enough? I need to ensure that the reformulated comment describes what the code does. Perhaps I should say "the code builds rope tables at init and advances positions by half the head" but I don't need to be too verbose.
+
+The instruction says "only describe what the code does", so I should be concise.
+
+Let me check the original: "Reformulate this comment from a assembly codebase" so the new comment should be about the same meaning.
+
+I think I can write: "At initialization, rope tables are constructed; positions advance by half the head."
+
+But I need to include ">>>" because the original has it. So: ">>>At initialization, rope tables are built, positions advance by half the head."
+
+I also have "dim<<<" which might be a typo for "dim", so I'll keep it as "dim<<<" but in the reformulated comment, I should not have "dim<<<" because that's part of the original. I think I should keep the original variable name, so "dim<<<" is fine.
+
+To be safe, I'll write: ">>>rope tables are built once at init, positions advance by half the head, dim<<<"
+
+But let's see if there's any missing part. The original says "Reformulate this comment from a assembly codebase", so the reformulated comment should be a comment that describes the code. I think that's it.
+
+I need to avoid "(" "--" ")", so I'll ensure my text has no parentheses, dash, or anything like that.
+
+In my proposed sentence, I don't have any of those, so it should be fine.
+
+Now, I'll write the reformulated comment exactly as it should be.
+
+I recall that in assembly, "--" might be used for jumps, but since I cannot use it, I'll just write the text without it.
+
+So, my output should be: ">>>rope tables are built once at init, positions advance by half the head, dim<<<"
+
+But let me check if I need to include ">>>" at the beginning. Yes, I think I should keep ">>>" as it is in the original.
+
+Also, the original has ">>>" at the start, so I'll keep it.
+
+I think that's it. I'll now write the response.
+
+=== APPLIED : examples\inc_reformulator\test_reformulator.inc : line 7 ===
+ORIGINAL : the swiglu gate multiplies the activation by its sigmoid -- gate and up rows share one prefetch
+REFORM   : swiglu multiplies activation by sigmoid and gate and prefetch rows up
+REASON   : ok
+REASONING:
+First, I need to reformulate the comment from a assembly codebase without information loss. The original comment is: ">>>the swiglu gate multiplies the activation by its sigmoid -- gate and up rows share one prefetch<<<Reformulate this comment from a assembly codebase to only describe what the code does, the new comment MUST not contain "(" "--" ")", now output the reformulated comment, only output the comment, nothing else, make certain no information is lost, write proper english keep close to the original comment!"
+
+I must ensure that the reformulated comment does not contain "(", "--", or ")". Also, I need to keep the original comment close to the original, so I should paraphrase it without using those symbols.
+
+Let me break down the original comment:
+
+- ">>>" might be a typo or artifact; I'll ignore it.
+
+- "the swiglu gate" – I think "swiglu" might be a typo for "swig" or something, but I'll keep it as is or try to infer. Actually, in the context, it might be "swig" but written as "swiglu". I'll keep "swiglu" as per original.
+
+- "multiplies the activation by its sigmoid" – so it multiplies the activation by the sigmoid function.
+
+- "-- gate" – I think "--" is a typo for "and" or something, but in the context, it might be "and" or "and gate". The original says "-- gate", so I'll use "and gate" or keep "--" if possible, but I must avoid "--". So I'll use "and gate".
+
+- "and up rows share one prefetch" – so it does an operation that involves up rows sharing one prefetch.
+
+- "<<<Reformulate this comment from a assembly codebase" – I need to reformulate the rest of the comment without using "<<<" or other symbols that might indicate the start of the reformulation. I should just output the reformulated comment as a string.
+
+So, I need to write a comment that describes what the code does, without using "(", "--", or ")". Also, keep it close to the original.
+
+Let me try to rephrase:
+
+Original: "the swiglu gate multiplies the activation by its sigmoid and gate and up rows share one prefetch"
+
+I need to avoid "(" and "--" and ")". So I'll write something like: "swiglu multiplies activation by sigmoid and gate and prefetch rows up" but I have to avoid "--", so I'll use "and" instead.
+
+Also, the original has ">>>" which I might omit.
+
+So, my reformulated comment should be: "swiglu multiplies activation by sigmoid and gate and prefetch rows up"
+
+But let's check: I used "and" instead of "--", which is fine. I didn't use "(", ")", or "<<<". I used "swiglu" which might be intended, but I'll keep it.
+
+I should ensure that I don't have any information lost. So, I'll just output the comment as a string.
+
+The instruction says: "now output the reformulated comment, only output the comment, nothing else, make certain no information is lost, write proper english keep close to the original comment!"
+
+So, I'll output exactly the reformulated comment.
+
+I think I should write: "swiglu multiplies activation by sigmoid and gate and prefetch rows up"
+
+But let's see if there are any issues. The original has "-- gate", so I replaced with "and gate". Also, "up rows share one prefetch" – I simplified to "prefetch rows up", which is okay.
+
+I'll write it without any punctuation except where necessary, but I think it's fine.
+
+To be precise, I'll avoid using "<<<" because it's not in the original, but I should not introduce new symbols that might indicate the start of reformulation. So I'll just write the comment as a continuous string.
+
+Final reformulated comment: "swiglu multiplies activation by sigmoid and gate and prefetch rows up"
+
+I'll output that.
